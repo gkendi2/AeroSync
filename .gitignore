@@ -41,3 +41,10 @@ example
 # generated native folders
 /ios
 /android
+
+# Python virtual environment
+.venv/
+
+# Local datasets
+data/raw/*.zip
+data/reference/*.zip
