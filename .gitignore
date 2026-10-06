@@ -48,3 +48,4 @@ example
 # Local datasets
 data/raw/*.zip
 data/reference/*.zip
+data/extracted/flight-delay-causes/Flight_delay.csv

@@ -1,0 +1,36 @@
+column_name,description,data_origin,source_or_method
+flight_id,Unique flight identifier,Source,Airport Operations flights.csv
+airline,Airline name,Source,Airport Operations flights.csv
+airline_code,Airline IATA code,Source,Airport Operations flights.csv
+origin,Origin airport code,Source,Airport Operations flights.csv
+destination,Destination airport code,Source,Airport Operations flights.csv
+route_type,Route classification,Source,Airport Operations flights.csv
+aircraft_type,Aircraft type,Source,Airport Operations flights.csv
+aircraft_registration,Aircraft registration,Source,Airport Operations flights.csv
+terminal,Airport terminal,Source,Airport Operations flights.csv
+gate,Assigned gate,Source,Airport Operations flights.csv
+flight_status,Flight operational status,Source,Airport Operations flights.csv
+scheduled_departure,Scheduled departure timestamp,Source,Airport Operations flights.csv
+estimated_departure,Estimated departure timestamp,Source,Airport Operations flights.csv
+scheduled_arrival,Scheduled arrival timestamp,Source,Airport Operations flights.csv
+estimated_arrival,Estimated arrival timestamp,Source,Airport Operations flights.csv
+scheduled_departure_date,Calendar date extracted from scheduled departure,Derived,Calculated from scheduled_departure
+scheduled_departure_hour,Hour extracted from scheduled departure,Derived,Calculated from scheduled_departure
+planned_capacity,Planned passenger capacity,Source,Airport Operations flights.csv
+passenger_count,Passenger count,Source,Airport Operations flights.csv
+load_factor_percent,Flight load factor percentage,Source,Airport Operations flights.csv
+baggage_count,Number of baggage records associated with the flight,Derived,Aggregated from baggage.csv
+total_baggage_weight_kg,Total recorded baggage weight in kilograms,Derived,Aggregated from baggage.csv
+average_baggage_weight_kg,Average baggage weight in kilograms,Derived,Aggregated from baggage.csv
+staff_required,Number of staff required in the simulated operational scenario,Simulated,AeroSync synthetic operational scenario
+staff_available,Number of staff available in the simulated operational scenario,Simulated,AeroSync synthetic operational scenario
+staff_availability_pct,Percentage of required staff available,Derived from simulated data,staff_available / staff_required × 100
+baggage_progress_pct,Estimated percentage of baggage handling completed at the simulated snapshot,Simulated,AeroSync synthetic operational scenario
+unresolved_incidents,Number of unresolved operational incidents at the simulated snapshot,Simulated,AeroSync synthetic operational scenario
+time_remaining_minutes,Minutes remaining before scheduled departure at the simulated snapshot,Simulated,AeroSync synthetic operational scenario
+delay_minutes,Recorded delay duration,Source,Airport Operations flights.csv
+delay_cause,Recorded delay cause,Source,Airport Operations flights.csv
+delay_status,Recorded source delay status,Source,Airport Operations flights.csv
+delay_occurred,Binary indicator showing whether delay_minutes is greater than zero,Derived,Calculated from delay_minutes
+operational_risk_score,Composite AeroSync operational risk score,Derived,"Calculated from staff, baggage, incident and time indicators"
+delay_risk,AeroSync delay-risk classification,Derived,Generated from the AeroSync synthetic scenario risk score

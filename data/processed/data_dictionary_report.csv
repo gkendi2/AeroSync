@@ -1,0 +1,224 @@
+file,column,data_type,missing_values,unique_values,example_values
+data\extracted\airport-operations\airport-operations-dataset\baggage.csv,0,str,0,2800,4717 7156 73 | 9554 7052 95 | 5297 9390 26 | 3709 8032 48 | 4390 1672 38
+data\extracted\airport-operations\airport-operations-dataset\baggage.csv,1,str,0,2800,KGIOOH | 2MPGWW | 18SB90 | Z8R2JA | TUX32U
+data\extracted\airport-operations\airport-operations-dataset\baggage.csv,2,str,0,925,AF-3841 | IX-7601 | UK-4661 | BA-8120 | AF-3272
+data\extracted\airport-operations\airport-operations-dataset\baggage.csv,3,str,0,2383,PP-****2486 | PP-****8781 | PP-****9444 | PP-****2845 | PP-****6145
+data\extracted\airport-operations\airport-operations-dataset\baggage.csv,4,float64,0,2800,6.629158562908144 | 15.573772533103446 | 17.576486511938853 | 29.596407974102643 | 5.6918032553934825
+data\extracted\airport-operations\airport-operations-dataset\baggage.csv,5,str,0,1,55x40x23
+data\extracted\airport-operations\airport-operations-dataset\baggage.csv,6,str,0,1,Check-in
+data\extracted\airport-operations\airport-operations-dataset\baggage.csv,7,str,0,1,C12
+data\extracted\airport-operations\airport-operations-dataset\baggage.csv,8,str,0,2800,2024-12-29 22:33:54 | 2024-11-10 17:23:51 | 2024-10-08 00:52:02 | 2024-12-26 03:26:42 | 2024-12-14 01:08:41
+data\extracted\airport-operations\airport-operations-dataset\baggage.csv,9,str,0,2797,2024-10-26 00:31:15 | 2024-11-08 15:25:09 | 2024-12-29 05:01:12 | 2024-11-22 17:00:45 | 2024-10-19 03:00:32
+data\extracted\airport-operations\airport-operations-dataset\baggage.csv,10,int64,0,10,2 | 3 | 7 | 9 | 1
+data\extracted\airport-operations\airport-operations-dataset\baggage.csv,11,str,0,1,Loaded
+data\extracted\airport-operations\airport-operations-dataset\baggage.csv,12,bool,0,1,False
+data\extracted\airport-operations\airport-operations-dataset\baggage.csv,13,int64,0,1,0
+data\extracted\airport-operations\airport-operations-dataset\baggage.csv,14,str,0,1,Ramp
+data\extracted\airport-operations\airport-operations-dataset\baggage.csv,15,str,0,2800,2024-12-20 12:03:08 | 2024-10-18 13:23:24 | 2024-11-22 23:47:12 | 2024-12-10 15:40:42 | 2024-12-15 08:15:57
+data\extracted\airport-operations\airport-operations-dataset\baggage.csv,16,bool,0,1,False
+data\extracted\airport-operations\airport-operations-dataset\baggage.csv,17,float64,2800,0,
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,0,str,0,996,UK-633 | BA-6017 | BA-7303 | KL-7243 | SG-1280
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,1,str,0,12,Vistara | British Airways | KLM | SpiceJet | Air France
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,2,str,0,12,UK | BA | KL | SG | AF
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,3,str,0,1,DEL
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,4,str,0,14,SIN | DXB | MAA | KUL | AMS
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,5,str,0,1000,2024-11-11 15:23:02 | 2024-10-05 07:49:26 | 2024-11-29 13:09:18 | 2024-11-15 15:07:07 | 2024-11-21 19:06:25
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,6,str,0,1000,2024-11-11 15:53:02 | 2024-10-05 07:49:26 | 2024-11-29 13:09:18 | 2024-11-15 15:37:07 | 2024-11-21 19:06:25
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,7,str,0,1000,2024-11-11 17:23:02 | 2024-10-05 14:49:26 | 2024-11-29 15:09:18 | 2024-11-15 22:07:07 | 2024-11-21 23:06:25
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,8,str,0,1000,2024-11-11 20:53:02 | 2024-10-05 15:49:26 | 2024-11-29 18:09:18 | 2024-11-16 01:37:07 | 2024-11-22 03:06:25
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,9,str,0,4,A350 | B737 | B787 | A320
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,10,str,0,975,VT-PIU | VT-JVI | VT-GJR | VT-HNH | VT-TED
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,11,int64,0,181,307 | 195 | 171 | 327 | 180
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,12,int64,0,200,271 | 169 | 141 | 288 | 178
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,13,str,0,1,Departed
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,14,int64,0,4,30 | 0 | 60 | 150
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,15,str,0,5,ATC | CREW | TECH | WX | TURNAROUND
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,16,str,0,1,T3
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,17,str,0,50,B3 | B12 | B50 | B29 | B11
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,18,bool,0,2,True | False
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,19,int64,0,963,9330 | 5766 | 4735 | 8936 | 3525
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,20,int64,0,993,37118 | 28762 | 25602 | 24737 | 17512
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,21,str,0,1000,2024-11-11 15:38:02 | 2024-10-05 07:34:26 | 2024-11-29 12:54:18 | 2024-11-15 15:22:07 | 2024-11-21 18:51:25
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,22,bool,0,2,True | False
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,23,str,0,2,Moderate | On-Time
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,24,float64,0,985,88.30218091521816 | 86.91641206755192 | 82.79207296277588 | 88.10054208482607 | 98.9473754507826
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,25,int64,0,120,81 | 57 | 125 | 144 | 84
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,26,float64,0,1000,0.7488038825386119 | 0.2247966455308476 | 0.0883398141740102 | 0.9533933461949364 | 0.6125260668293881
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,27,str,0,3,Morning | Evening | Night
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,28,str,0,7,Mon | Sat | Fri | Thu | Tue
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,29,bool,0,2,False | True
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,30,str,0,2,Autumn | Winter
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,31,str,0,2,Long-Haul Intl | Domestic
+data\extracted\airport-operations\airport-operations-dataset\gate_events.csv,0,str,0,1200,T3-R18-474592 | T3-R1-628000 | T3-C36-179350 | T3-H42-881926 | T3-L5-789791
+data\extracted\airport-operations\airport-operations-dataset\gate_events.csv,1,str,0,687,SQ-3327 | SG-6153 | BA-2358 | AF-3581 | AF-2110
+data\extracted\airport-operations\airport-operations-dataset\gate_events.csv,2,str,0,1,B12
+data\extracted\airport-operations\airport-operations-dataset\gate_events.csv,3,str,0,1,T3
+data\extracted\airport-operations\airport-operations-dataset\gate_events.csv,4,str,0,1,Boarding Start
+data\extracted\airport-operations\airport-operations-dataset\gate_events.csv,5,str,0,1199,2024-11-02 17:32:39 | 2024-12-07 18:08:42 | 2024-11-23 18:16:22 | 2024-12-20 02:32:17 | 2024-12-12 01:31:37
+data\extracted\airport-operations\airport-operations-dataset\gate_events.csv,6,str,0,1200,MTC-WY2PD | CC-4XB4R | RET-F0Z0A | OPS-OW29G | GH-6K8Y5
+data\extracted\airport-operations\airport-operations-dataset\gate_events.csv,7,int64,0,1,120
+data\extracted\airport-operations\airport-operations-dataset\gate_events.csv,8,str,0,1,Routine
+data\extracted\airport-operations\airport-operations-dataset\gate_events.csv,9,bool,0,1,False
+data\extracted\airport-operations\airport-operations-dataset\gate_events.csv,10,float64,1200,0,
+data\extracted\airport-operations\airport-operations-dataset\gate_events.csv,11,str,0,1200,2024-12-04 04:38:23 | 2024-11-29 14:00:10 | 2024-10-02 05:22:37 | 2024-10-28 11:19:24 | 2024-11-23 11:24:19
+data\extracted\airport-operations\airport-operations-dataset\gate_events.csv,12,str,0,1200,2024-10-07 18:34:54 | 2024-12-14 08:37:08 | 2024-10-30 20:39:09 | 2024-11-07 22:38:40 | 2024-10-06 06:30:39
+data\extracted\airport-operations\airport-operations-dataset\gate_events.csv,13,str,0,1200,2024-10-07 04:40:00 | 2024-11-26 19:54:28 | 2024-12-01 02:53:39 | 2024-12-23 07:58:51 | 2024-10-28 20:50:23
+data\extracted\airport-operations\airport-operations-dataset\maintenance_logs.csv,0,str,0,394,VT-ABC-WO-9571 | VT-ABC-WO-4993 | VT-ABC-WO-3449 | VT-ABC-WO-4225 | VT-ABC-WO-3772
+data\extracted\airport-operations\airport-operations-dataset\maintenance_logs.csv,1,str,0,1,VT-ABC
+data\extracted\airport-operations\airport-operations-dataset\maintenance_logs.csv,2,str,0,330,BA-1432 | KL-339 | IX-9665 | SQ-7179 | SG-8995
+data\extracted\airport-operations\airport-operations-dataset\maintenance_logs.csv,3,str,0,1,Inspection
+data\extracted\airport-operations\airport-operations-dataset\maintenance_logs.csv,4,str,0,400,RET-CUHDG | GH-NIUIB | OPS-UC1BZ | SEC-O6DDI | GH-9TI5Z
+data\extracted\airport-operations\airport-operations-dataset\maintenance_logs.csv,5,str,0,400,2024-11-21 04:13:32 | 2024-12-05 20:45:26 | 2024-11-28 05:00:42 | 2024-12-23 17:40:40 | 2024-10-14 03:53:26
+data\extracted\airport-operations\airport-operations-dataset\maintenance_logs.csv,6,str,0,400,2024-12-09 02:19:49 | 2024-10-28 01:08:01 | 2024-10-08 23:40:47 | 2024-10-06 20:59:16 | 2024-10-24 16:45:05
+data\extracted\airport-operations\airport-operations-dataset\maintenance_logs.csv,7,int64,0,1,5
+data\extracted\airport-operations\airport-operations-dataset\maintenance_logs.csv,8,int64,0,1,32
+data\extracted\airport-operations\airport-operations-dataset\maintenance_logs.csv,9,str,0,1,Hydraulic leak
+data\extracted\airport-operations\airport-operations-dataset\maintenance_logs.csv,10,str,0,1,Seal
+data\extracted\airport-operations\airport-operations-dataset\maintenance_logs.csv,11,int64,0,1,3
+data\extracted\airport-operations\airport-operations-dataset\maintenance_logs.csv,12,str,0,400,MTC-9WAIO | RET-0E5NW | SEC-96PG5 | SEC-ZQ12M | CC-IQNHJ
+data\extracted\airport-operations\airport-operations-dataset\maintenance_logs.csv,13,bool,0,1,False
+data\extracted\airport-operations\airport-operations-dataset\maintenance_logs.csv,14,bool,0,1,False
+data\extracted\airport-operations\airport-operations-dataset\maintenance_logs.csv,15,float64,400,0,
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,0,str,0,2500,MKVIIB | D9ZVYH | XMVUE9 | EUW1V8 | ZSWMEF
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,1,int64,0,2500,67238288802223 | 92644493538349 | 55347216336871 | 20915861205333 | 54594071817635
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,2,str,0,2204,PP-****4444 | PP-****3713 | PP-****8891 | PP-****9085 | PP-****5188
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,3,str,0,527,Adya | Barkha | Gaurang | Chaitaly | Ekbal
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,4,str,0,532,More | Jha | Ganesan | Barad | Ray
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,5,str,0,5,French | Indian | German | British | UAE
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,6,str,0,2382,1953-01-20 | 1945-09-03 | 1978-03-03 | 1979-07-05 | 1965-07-08
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,7,str,0,2,F | M
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,8,str,0,180,2E | 19E | 12F | 10B | 20E
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,9,str,0,2,Business | Economy
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,10,str,0,908,6E-1311 | 6E-3158 | SQ-803 | BA-2358 | EK-8117
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,11,str,0,2500,2024-11-09 23:59:31.761870 | 2024-12-11 17:10:18.636191 | 2024-11-18 18:41:11.160449 | 2024-10-05 05:44:08.777767 | 2024-10-15 07:30:03.575437
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,12,str,0,2500,2024-11-10 00:59:31.761870 | 2024-12-11 18:10:18.636191 | 2024-11-18 19:41:11.160449 | 2024-10-05 06:44:08.777767 | 2024-10-15 08:30:03.575437
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,13,str,0,50,B4 | B36 | B27 | B31 | B13
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,14,int64,0,4,20 | 15 | 30 | 25
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,15,float64,2500,0,
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,16,float64,2500,0,
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,17,float64,2500,0,
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,18,str,0,2494,waida11@example.net | ztella@example.com | neelsarma@example.org | yashoda57@example.net | meghanalata@example.net
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,19,str,0,2500,+91-0535587138 | +91-4555880559 | +91-3951894244 | +91-5019031940 | +91-7752405087
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,20,float64,2500,0,
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,21,float64,2500,0,
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,22,bool,0,2,False | True
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,23,float64,0,2500,2.965899480555556 | -0.3687878308333333 | 4.017733208611111 | 3.5245061758333334 | 3.733729045277778
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,24,bool,0,2,False | True
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,25,str,0,2,Economy | Business
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,26,int64,0,81,71 | 79 | 46 | 45 | 59
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,27,str,0,4,Youth | Adult | Senior | Child
+data\extracted\airport-operations\airport-operations-dataset\retail_transactions.csv,0,str,0,2999,KSK4-1774440315797 | KSK7-1774440138660 | KSK8-1774440268062 | KSK9-1774440842858 | KSK5-1774440382750
+data\extracted\airport-operations\airport-operations-dataset\retail_transactions.csv,1,str,0,3000,OPS-VSGQN | RET-3S5LI | OPS-DWXIT | OPS-7UR7X | SEC-IN5LW
+data\extracted\airport-operations\airport-operations-dataset\retail_transactions.csv,2,str,0,1,Duty Free
+data\extracted\airport-operations\airport-operations-dataset\retail_transactions.csv,3,str,0,1,Retail
+data\extracted\airport-operations\airport-operations-dataset\retail_transactions.csv,4,str,0,2554,PP-****8382 | PP-****3678 | PP-****9251 | PP-****2112 | PP-****7283
+data\extracted\airport-operations\airport-operations-dataset\retail_transactions.csv,5,str,0,942,AI-2637 | LH-4094 | SG-687 | AI-362 | UK-903
+data\extracted\airport-operations\airport-operations-dataset\retail_transactions.csv,6,str,0,3000,2024-12-29 18:54:03 | 2024-11-14 22:30:19 | 2024-12-07 21:42:36 | 2024-10-14 04:29:03 | 2024-10-13 04:41:53
+data\extracted\airport-operations\airport-operations-dataset\retail_transactions.csv,7,str,0,1,Perfume
+data\extracted\airport-operations\airport-operations-dataset\retail_transactions.csv,8,int64,0,1,1
+data\extracted\airport-operations\airport-operations-dataset\retail_transactions.csv,9,int64,0,2489,3185 | 1556 | 6019 | 743 | 1496
+data\extracted\airport-operations\airport-operations-dataset\retail_transactions.csv,10,int64,0,2429,1433 | 1637 | 6630 | 899 | 1841
+data\extracted\airport-operations\airport-operations-dataset\retail_transactions.csv,11,str,0,1,Card
+data\extracted\airport-operations\airport-operations-dataset\retail_transactions.csv,12,str,0,1,INR
+data\extracted\airport-operations\airport-operations-dataset\retail_transactions.csv,13,float64,3000,0,
+data\extracted\airport-operations\airport-operations-dataset\retail_transactions.csv,14,str,0,1,T3
+data\extracted\airport-operations\airport-operations-dataset\retail_transactions.csv,15,str,0,1,Near Gate
+data\extracted\airport-operations\airport-operations-dataset\retail_transactions.csv,16,bool,0,1,True
+data\extracted\airport-operations\airport-operations-dataset\security_screening.csv,0,str,0,2500,SCR369386 | SCR890504 | SCR702274 | SCR240363 | SCR632408
+data\extracted\airport-operations\airport-operations-dataset\security_screening.csv,1,str,0,2183,PP-****3049 | PP-****6099 | PP-****5183 | PP-****2181 | PP-****5144
+data\extracted\airport-operations\airport-operations-dataset\security_screening.csv,2,str,0,2500,SZCC0Y | G7KPR7 | K43VTP | QJUWSB | CTOQ1L
+data\extracted\airport-operations\airport-operations-dataset\security_screening.csv,3,int64,0,8,1 | 3 | 7 | 4 | 6
+data\extracted\airport-operations\airport-operations-dataset\security_screening.csv,4,str,0,2499,2024-12-03 01:26:50 | 2024-10-18 22:57:57 | 2024-11-15 12:24:41 | 2024-10-19 14:16:41 | 2024-11-17 17:50:25
+data\extracted\airport-operations\airport-operations-dataset\security_screening.csv,5,str,0,2500,2024-10-28 07:40:04 | 2024-10-31 05:00:15 | 2024-11-17 23:36:49 | 2024-10-20 05:33:52 | 2024-12-27 22:03:53
+data\extracted\airport-operations\airport-operations-dataset\security_screening.csv,6,str,0,2500,2024-12-03 18:57:42 | 2024-12-05 17:18:25 | 2024-10-04 05:08:50 | 2024-11-11 23:03:11 | 2024-12-13 13:09:13
+data\extracted\airport-operations\airport-operations-dataset\security_screening.csv,7,str,0,1,Clear
+data\extracted\airport-operations\airport-operations-dataset\security_screening.csv,8,float64,2500,0,
+data\extracted\airport-operations\airport-operations-dataset\security_screening.csv,9,bool,0,1,False
+data\extracted\airport-operations\airport-operations-dataset\security_screening.csv,10,str,0,2500,RET-0KANP | RET-2EQ36 | CC-KAK8T | CC-T40QI | SEC-N2YV1
+data\extracted\airport-operations\airport-operations-dataset\security_screening.csv,11,str,0,1,XRAY-1
+data\extracted\airport-operations\airport-operations-dataset\security_screening.csv,12,int64,0,1,60
+data\extracted\airport-operations\airport-operations-dataset\security_screening.csv,13,bool,0,1,False
+data\extracted\airport-operations\airport-operations-dataset\security_screening.csv,14,bool,0,1,False
+data\extracted\airport-operations\airport-operations-dataset\security_screening.csv,15,str,0,1,SHIFT-1
+data\extracted\airport-operations\airport-operations-dataset\security_screening.csv,16,int64,0,1,400
+data\extracted\airport-operations\airport-operations-dataset\security_screening.csv,17,int64,0,1,200
+data\extracted\airport-operations\airport-operations-dataset\security_screening.csv,18,int64,0,1,200
+data\extracted\airport-operations\airport-operations-dataset\security_screening.csv,19,bool,0,1,False
+data\extracted\airport-operations\airport-operations-dataset\staff_shifts.csv,0,str,0,600,SEC-UGHFA | CC-FAALU | RET-DEE2V | GH-QO7VG | RET-5W8IK
+data\extracted\airport-operations\airport-operations-dataset\staff_shifts.csv,1,str,0,599,Gavin Sastry | Gaurav Sandal | Upasna D’Alia | Yuvraj Wadhwa | Watika Deep
+data\extracted\airport-operations\airport-operations-dataset\staff_shifts.csv,2,str,0,1,Ops
+data\extracted\airport-operations\airport-operations-dataset\staff_shifts.csv,3,str,0,1,Agent
+data\extracted\airport-operations\airport-operations-dataset\staff_shifts.csv,4,str,0,91,2024-12-29 | 2024-10-11 | 2024-10-16 | 2024-10-10 | 2024-10-01
+data\extracted\airport-operations\airport-operations-dataset\staff_shifts.csv,5,str,0,600,2024-12-12 04:52:42 | 2024-10-07 11:45:01 | 2024-11-30 15:09:34 | 2024-11-08 19:25:10 | 2024-12-21 17:11:15
+data\extracted\airport-operations\airport-operations-dataset\staff_shifts.csv,6,str,0,600,2024-10-19 14:08:02 | 2024-10-26 21:36:24 | 2024-11-13 10:41:25 | 2024-11-09 07:06:57 | 2024-11-14 07:29:53
+data\extracted\airport-operations\airport-operations-dataset\staff_shifts.csv,7,str,0,1,T3
+data\extracted\airport-operations\airport-operations-dataset\staff_shifts.csv,8,str,0,1,B12
+data\extracted\airport-operations\airport-operations-dataset\staff_shifts.csv,9,str,0,600,OPS-AUNOS | RET-958NY | RET-EXRE9 | RET-LNR53 | OPS-NIX6M
+data\extracted\airport-operations\airport-operations-dataset\staff_shifts.csv,10,int64,0,1,8
+data\extracted\airport-operations\airport-operations-dataset\staff_shifts.csv,11,bool,0,1,False
+data\extracted\airport-operations\airport-operations-dataset\staff_shifts.csv,12,float64,600,0,
+data\extracted\airport-operations\airport-operations-dataset\staff_shifts.csv,13,str,0,90,2024-11-30 | 2024-12-26 | 2024-11-15 | 2024-12-08 | 2024-12-04
+data\extracted\airport-operations\airport-operations-dataset\staff_shifts.csv,14,str,0,1,English
+data\extracted\flight-delay-causes\Flight_delay.csv,DayOfWeek,int64,0,7,4 | 5 | 6 | 7 | 1
+data\extracted\flight-delay-causes\Flight_delay.csv,Date,str,0,181,03-01-2019 | 04-01-2019 | 05-01-2019 | 06-01-2019 | 07-01-2019
+data\extracted\flight-delay-causes\Flight_delay.csv,DepTime,int64,0,1394,1829 | 1937 | 1644 | 1452 | 1323
+data\extracted\flight-delay-causes\Flight_delay.csv,ArrTime,int64,0,1438,1959 | 2037 | 1845 | 1640 | 1526
+data\extracted\flight-delay-causes\Flight_delay.csv,CRSArrTime,int64,0,1285,1925 | 1940 | 1725 | 1625 | 1510
+data\extracted\flight-delay-causes\Flight_delay.csv,UniqueCarrier,str,0,12,WN | OO | UA | US | DL
+data\extracted\flight-delay-causes\Flight_delay.csv,Airline,str,0,12,Southwest Airlines Co. | Skywest Airlines Inc. | United Air Lines Inc. | US Airways Inc. | Delta Air Lines Inc.
+data\extracted\flight-delay-causes\Flight_delay.csv,FlightNum,int64,0,6092,3920 | 509 | 1333 | 675 | 4
+data\extracted\flight-delay-causes\Flight_delay.csv,TailNum,str,0,3512,N464WN | N763SW | N334SW | N286WN | N674AA
+data\extracted\flight-delay-causes\Flight_delay.csv,ActualElapsedTime,int64,0,613,90 | 240 | 121 | 228 | 123
+data\extracted\flight-delay-causes\Flight_delay.csv,CRSElapsedTime,int64,0,461,90 | 250 | 135 | 240 | 70
+data\extracted\flight-delay-causes\Flight_delay.csv,AirTime,int64,0,581,77 | 230 | 107 | 213 | 110
+data\extracted\flight-delay-causes\Flight_delay.csv,ArrDelay,int64,0,756,34 | 57 | 80 | 15 | 16
+data\extracted\flight-delay-causes\Flight_delay.csv,DepDelay,int64,0,777,34 | 67 | 94 | 27 | 28
+data\extracted\flight-delay-causes\Flight_delay.csv,Origin,str,0,274,IND | ISP | JAN | JAX | LAS
+data\extracted\flight-delay-causes\Flight_delay.csv,Org_Airport,str,1177,259,Indianapolis International Airport | Long Island MacArthur Airport | Jackson-Evers International Airport | Jacksonville International Airport | McCarran International Airport
+data\extracted\flight-delay-causes\Flight_delay.csv,Dest,str,0,274,BWI | LAS | MCO | PHX | TPA
+data\extracted\flight-delay-causes\Flight_delay.csv,Dest_Airport,str,1479,259,Baltimore-Washington International Airport | McCarran International Airport | Orlando International Airport | Phoenix Sky Harbor International Airport | Tampa International Airport
+data\extracted\flight-delay-causes\Flight_delay.csv,Distance,int64,0,1134,515 | 1591 | 828 | 1489 | 838
+data\extracted\flight-delay-causes\Flight_delay.csv,TaxiIn,int64,0,144,3 | 6 | 7 | 4 | 2
+data\extracted\flight-delay-causes\Flight_delay.csv,TaxiOut,int64,0,277,10 | 7 | 8 | 9 | 5
+data\extracted\flight-delay-causes\Flight_delay.csv,Cancelled,int64,0,1,0
+data\extracted\flight-delay-causes\Flight_delay.csv,CancellationCode,str,0,1,N
+data\extracted\flight-delay-causes\Flight_delay.csv,Diverted,int64,0,1,0
+data\extracted\flight-delay-causes\Flight_delay.csv,CarrierDelay,int64,0,708,2 | 10 | 8 | 3 | 0
+data\extracted\flight-delay-causes\Flight_delay.csv,WeatherDelay,int64,0,457,0 | 24 | 12 | 22 | 7
+data\extracted\flight-delay-causes\Flight_delay.csv,NASDelay,int64,0,456,0 | 6 | 28 | 4 | 22
+data\extracted\flight-delay-causes\Flight_delay.csv,SecurityDelay,int64,0,119,0 | 10 | 8 | 12 | 3
+data\extracted\flight-delay-causes\Flight_delay.csv,LateAircraftDelay,int64,0,462,32 | 47 | 72 | 12 | 16
+data\extracted\kq-routes-reference\airlines.csv,Airline ID,int64,0,6162,-1 | 1 | 2 | 3 | 4
+data\extracted\kq-routes-reference\airlines.csv,Name,str,0,6073,Unknown | Private flight | 135 Airways | 1Time Airline | 2 Sqn No 1 Elementary Flying Training School
+data\extracted\kq-routes-reference\airlines.csv,Alias,str,506,179,\N | ANA All Nippon Airways | Air Asia | Pulkovo Aviation Enterprise | bmi British Midland
+data\extracted\kq-routes-reference\airlines.csv,IATA,str,4627,1121,- | 1T | Q5 | AN | 1B
+data\extracted\kq-routes-reference\airlines.csv,ICAO,str,87,5854,GNL | RNX | WYT | TFU | CHD
+data\extracted\kq-routes-reference\airlines.csv,Callsign,str,808,5262,\N | GENERAL | NEXTIME | CHKALOVSK-AVIA | CARGO UNIT
+data\extracted\kq-routes-reference\airlines.csv,Country,str,15,277,\N | United States | South Africa | United Kingdom | Russia
+data\extracted\kq-routes-reference\airlines.csv,Active,str,0,3,Y | N | n
+data\extracted\kq-routes-reference\airplanes.csv,Name,str,0,246,Aerospatiale (Nord) 262 | Aerospatiale (Sud Aviation) Se.210 Caravelle | Aerospatiale SN.601 Corvette | Aerospatiale/Alenia ATR 42-300 | Aerospatiale/Alenia ATR 42-500
+data\extracted\kq-routes-reference\airplanes.csv,IATA code,str,0,221,ND2 | CRV | NDC | AT4 | AT5
+data\extracted\kq-routes-reference\airplanes.csv,ICAO code,str,0,232,N262 | S210 | S601 | AT43 | AT45
+data\extracted\kq-routes-reference\airports.csv,Airport ID,int64,0,7698,1 | 2 | 3 | 4 | 5
+data\extracted\kq-routes-reference\airports.csv,Name,str,0,7658,Goroka Airport | Madang Airport | Mount Hagen Kagamuga Airport | Nadzab Airport | Port Moresby Jacksons International Airport
+data\extracted\kq-routes-reference\airports.csv,City,str,49,6955,Goroka | Madang | Mount Hagen | Nadzab | Port Moresby
+data\extracted\kq-routes-reference\airports.csv,Country,str,0,237,Papua New Guinea | Greenland | Iceland | Canada | Algeria
+data\extracted\kq-routes-reference\airports.csv,IATA,str,0,6073,GKA | MAG | HGU | LAE | POM
+data\extracted\kq-routes-reference\airports.csv,ICAO,str,0,7698,AYGA | AYMD | AYMH | AYNZ | AYPY
+data\extracted\kq-routes-reference\airports.csv,Latitude,float64,0,7683,-6.0816898345900015 | -5.20707988739 | -5.826789855957031 | -6.569803 | -9.44338035583496
+data\extracted\kq-routes-reference\airports.csv,Longitude,float64,0,7686,145.391998291 | 145.789001465 | 144.29600524902344 | 146.725977 | 147.22000122070312
+data\extracted\kq-routes-reference\airports.csv,Altitude,int64,0,2522,5282 | 20 | 5388 | 239 | 146
+data\extracted\kq-routes-reference\airports.csv,Timezone,str,0,41,10 | -3 | -4 | 0 | -5
+data\extracted\kq-routes-reference\airports.csv,DST,str,0,8,U | E | N | A | S
+data\extracted\kq-routes-reference\airports.csv,Tz database time zone,str,0,308,Pacific/Port_Moresby | America/Godthab | America/Thule | Atlantic/Reykjavik | America/Toronto
+data\extracted\kq-routes-reference\airports.csv,Type,str,0,1,airport
+data\extracted\kq-routes-reference\airports.csv,Source,str,0,1,OurAirports
+data\extracted\kq-routes-reference\routes.csv,Airline,str,0,568,2B | 2G | 2I | 2J | 2K
+data\extracted\kq-routes-reference\routes.csv,Airline ID,str,0,548,410 | 1654 | 8359 | 470 | 1338
+data\extracted\kq-routes-reference\routes.csv,Source airport,str,0,3409,AER | ASF | CEK | DME | EGO
+data\extracted\kq-routes-reference\routes.csv,Source airport ID,str,0,3321,2965 | 2966 | 2968 | 4029 | 6156
+data\extracted\kq-routes-reference\routes.csv,Destination airport,str,0,3418,KZN | MRV | OVB | NBC | TGK
+data\extracted\kq-routes-reference\routes.csv,Destination airport ID,str,0,3327,2990 | 2962 | 4078 | 6969 | \N
+data\extracted\kq-routes-reference\routes.csv,Codeshare,str,53066,1,Y
+data\extracted\kq-routes-reference\routes.csv,Stops,int64,0,2,0 | 1
+data\extracted\kq-routes-reference\routes.csv,Equipment,str,18,3945,CR2 | A81 | AN4 | 142 | 142 141

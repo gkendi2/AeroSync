@@ -1,0 +1,14 @@
+file,rows,columns,missing_values,duplicate_rows,status
+data\extracted\airport-operations\airport-operations-dataset\baggage.csv,2800,18,2800,0,OK
+data\extracted\airport-operations\airport-operations-dataset\flights.csv,1000,32,0,0,OK
+data\extracted\airport-operations\airport-operations-dataset\gate_events.csv,1200,14,1200,0,OK
+data\extracted\airport-operations\airport-operations-dataset\maintenance_logs.csv,400,16,400,0,OK
+data\extracted\airport-operations\airport-operations-dataset\passengers.csv,2500,28,12500,0,OK
+data\extracted\airport-operations\airport-operations-dataset\retail_transactions.csv,3000,17,3000,0,OK
+data\extracted\airport-operations\airport-operations-dataset\security_screening.csv,2500,20,2500,0,OK
+data\extracted\airport-operations\airport-operations-dataset\staff_shifts.csv,600,15,600,0,OK
+data\extracted\flight-delay-causes\Flight_delay.csv,484551,29,2656,2,OK
+data\extracted\kq-routes-reference\airlines.csv,6162,8,6043,0,OK
+data\extracted\kq-routes-reference\airplanes.csv,246,3,0,0,OK
+data\extracted\kq-routes-reference\airports.csv,7698,14,49,0,OK
+data\extracted\kq-routes-reference\routes.csv,67663,9,53084,0,OK
