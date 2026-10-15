@@ -1,3 +1,7 @@
+import {
+    HandlingError,
+    recordHandlingEvent,
+} from '@/features/baggage/handlingService';
 import { auth, db } from '@/lib/firebase';
 import {
     CameraView,
@@ -6,12 +10,8 @@ import {
 } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import {
-    addDoc,
-    collection,
     doc,
     getDoc,
-    serverTimestamp,
-    updateDoc,
 } from 'firebase/firestore';
 import { useState } from 'react';
 import {
@@ -163,7 +163,9 @@ export default function ScanQRScreen() {
       const qrData = scannedResults[0]?.data;
 
       if (!qrData) {
-        setMessage('The selected image does not contain readable QR data.');
+        setMessage(
+          'The selected image does not contain readable QR data.'
+        );
         return;
       }
 
@@ -191,50 +193,31 @@ export default function ScanQRScreen() {
     setSaving(true);
 
     try {
-      const eventCollection = collection(
-        db,
-        'BaggageRecords',
+      console.log('Recording baggage handling action...', {
+        action,
+        baggageDocumentId: baggage.id,
+        baggageId: baggage.baggageId || baggage.id,
+        flightId: baggage.flightId || '',
+        handlerUid: auth.currentUser.uid,
+      });
+
+      const newStatus = await recordHandlingEvent(
         baggage.id,
-        'handlingEvents'
+        action,
+        auth.currentUser.uid
       );
 
-      console.log('STEP 1: Creating handling event...', {
+      console.log('Baggage handling transaction succeeded.', {
         action,
+        newStatus,
         baggageDocumentId: baggage.id,
-        baggageId: baggage.baggageId || baggage.id,
-        flightId: baggage.flightId || '',
-        handlerUid: auth.currentUser.uid,
       });
-
-      await addDoc(eventCollection, {
-        action,
-        baggageId: baggage.baggageId || baggage.id,
-        flightId: baggage.flightId || '',
-        handlerUid: auth.currentUser.uid,
-        timestamp: serverTimestamp(),
-      });
-
-      console.log('STEP 1 SUCCESS: Handling event created.');
-
-      console.log('STEP 2: Updating baggage record...', {
-        baggageDocumentId: baggage.id,
-        newStatus: action === 'Loading' ? 'Loading' : 'Offloaded',
-      });
-
-      await updateDoc(doc(db, 'BaggageRecords', baggage.id), {
-        status: action === 'Loading' ? 'Loading' : 'Offloaded',
-        lastHandlingAction: action,
-        lastHandledBy: auth.currentUser.uid,
-        lastHandledAt: serverTimestamp(),
-      });
-
-      console.log('STEP 2 SUCCESS: Baggage record updated.');
 
       setBaggage((previous) =>
         previous
           ? {
               ...previous,
-              status: action === 'Loading' ? 'Loading' : 'Offloaded',
+              status: newStatus,
             }
           : null
       );
@@ -244,12 +227,16 @@ export default function ScanQRScreen() {
         `${action} was saved for ${baggage.baggageId || baggage.id}.`
       );
     } catch (error) {
-      console.error('HANDLING ERROR:', error);
+      console.error('Could not save handling event:', error);
 
-      Alert.alert(
-        'Could not save event',
-        'Firebase rejected one of the handling operations. Check the terminal for STEP 1 or STEP 2.'
-      );
+      if (error instanceof HandlingError) {
+        Alert.alert('Could not save event', error.message);
+      } else {
+        Alert.alert(
+          'Could not save event',
+          'The handling action could not be saved. Please try again.'
+        );
+      }
     } finally {
       setSaving(false);
     }
@@ -266,6 +253,7 @@ export default function ScanQRScreen() {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.center}>
           <ActivityIndicator size="large" color={NAVY} />
+
           <Text style={styles.messageText}>
             Checking camera permission…
           </Text>
