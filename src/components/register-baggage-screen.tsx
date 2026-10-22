@@ -1,16 +1,21 @@
 import { auth, db } from '@/lib/firebase';
-import { collection, doc, serverTimestamp, setDoc } from 'firebase/firestore';
+import {
+  collection,
+  doc,
+  serverTimestamp,
+  writeBatch,
+} from 'firebase/firestore';
 import { useState } from 'react';
 import {
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 import BaggageQrCard from '@/components/baggage-qr-card';
@@ -36,26 +41,29 @@ export default function RegisterBaggageScreen({
   onBack,
 }: RegisterBaggageScreenProps) {
   const [flightNumber, setFlightNumber] = useState('');
-  const [baggageReference, setBaggageReference] = useState('');
+  const [bagCount, setBagCount] = useState('');
   const [registering, setRegistering] = useState(false);
-  // The bag just registered; while set, the page shows its result and QR.
-  const [registered, setRegistered] = useState<RegisteredBaggage | null>(null);
+  const [registered, setRegistered] = useState<RegisteredBaggage[]>([]);
 
-  const registerBaggage = async () => {
+  const registerBaggageBatch = async () => {
     if (registering) {
       return;
     }
 
     const flightCheck = validateFlightNumber(flightNumber);
-    const reference = baggageReference.trim().toUpperCase();
 
     if (!flightCheck.ok) {
       Alert.alert('Invalid flight number', flightCheck.error);
       return;
     }
 
-    if (!reference) {
-      Alert.alert('Missing information', 'Please enter the baggage reference.');
+    const count = Number.parseInt(bagCount.trim(), 10);
+
+    if (!Number.isInteger(count) || count < 1 || count > 100) {
+      Alert.alert(
+        'Invalid number of bags',
+        'Enter a number between 1 and 100.',
+      );
       return;
     }
 
@@ -67,39 +75,56 @@ export default function RegisterBaggageScreen({
     setRegistering(true);
 
     try {
-      // Generate the ID first so the whole record is saved in one write.
-      const newRecord = doc(collection(db, 'BaggageRecords'));
-      const fields = {
-        baggageId: `BAG-${newRecord.id}`,
-        flightId: flightCheck.flight,
-        baggageReference: reference,
-        status: 'Registered' as const,
-        qrId: newRecord.id,
-        qrPayload: buildQrPayload(newRecord.id),
-        registeredBy: auth.currentUser.uid,
-      };
+      const batch = writeBatch(db);
+      const createdRecords: RegisteredBaggage[] = [];
 
-      await setDoc(newRecord, { ...fields, createdAt: serverTimestamp() });
+      for (let index = 1; index <= count; index += 1) {
+        const newRecord = doc(collection(db, 'BaggageRecords'));
 
-      const record: RegisteredBaggage = { id: newRecord.id, ...fields };
+        const baggageReference = `${flightCheck.flight}-BAG-${String(
+          index,
+        ).padStart(3, '0')}`;
 
-      setRegistered(record);
+        const fields = {
+          baggageId: `BAG-${newRecord.id}`,
+          flightId: flightCheck.flight,
+          baggageReference,
+          status: 'Registered' as const,
+          qrId: newRecord.id,
+          qrPayload: buildQrPayload(newRecord.id),
+          registeredBy: auth.currentUser.uid,
+        };
+
+        batch.set(newRecord, {
+          ...fields,
+          createdAt: serverTimestamp(),
+        });
+
+        createdRecords.push({
+          id: newRecord.id,
+          ...fields,
+        });
+      }
+
+      await batch.commit();
+
+      setRegistered(createdRecords);
       setFlightNumber('');
-      setBaggageReference('');
+      setBagCount('');
     } catch (error) {
-      console.error('Error registering baggage:', error);
+      console.error('Error registering baggage batch:', error);
 
       Alert.alert(
         'Registration failed',
-        'The baggage could not be registered. Please try again.',
+        'The baggage operation could not be created. Please try again.',
       );
     } finally {
       setRegistering(false);
     }
   };
 
-  const registerAnother = () => {
-    setRegistered(null);
+  const registerAnotherBatch = () => {
+    setRegistered([]);
   };
 
   return (
@@ -120,54 +145,89 @@ export default function RegisterBaggageScreen({
           <Text style={styles.backButtonText}>‹ Back to baggage</Text>
         </TouchableOpacity>
 
-        <Text style={styles.title}>Register Baggage</Text>
+        <Text style={styles.title}>Create Baggage Operation</Text>
+
         <Text style={styles.subtitle}>
-          {registered
-            ? 'The bag has been saved. Attach or save its QR code below.'
-            : 'Enter the bag details. A QR code is generated as soon as it is saved.'}
+          Select a flight and enter the number of bags. AeroSync will create
+          the individual baggage records and QR identifiers.
         </Text>
 
-        {registered ? (
+        {registered.length > 0 ? (
           <>
             <View style={[styles.card, styles.successCard]}>
-              <Text style={styles.successTitle}>✓ Baggage registered</Text>
+              <Text style={styles.successTitle}>
+                ✓ Baggage operation created
+              </Text>
 
               <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Baggage ID</Text>
-                <Text style={styles.detailValue}>{registered.baggageId}</Text>
-              </View>
-              <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Flight</Text>
-                <Text style={styles.detailValue}>{registered.flightId}</Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Reference</Text>
                 <Text style={styles.detailValue}>
-                  {registered.baggageReference}
+                  {registered[0].flightId}
                 </Text>
               </View>
+
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Bags registered</Text>
+                <Text style={styles.detailValue}>
+                  {registered.length}
+                </Text>
+              </View>
+
               <View style={[styles.detailRow, styles.detailRowLast]}>
-                <Text style={styles.detailLabel}>Status</Text>
-                <Text style={styles.detailValue}>{registered.status}</Text>
+                <Text style={styles.detailLabel}>Initial status</Text>
+                <Text style={styles.detailValue}>Registered</Text>
               </View>
             </View>
 
-            <BaggageQrCard record={registered} title="Baggage QR Code" />
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Generated Baggage Records</Text>
+
+              {registered.map((record) => (
+                <View key={record.id} style={styles.recordRow}>
+                  <View style={styles.recordMain}>
+                    <Text style={styles.recordId}>
+                      {record.baggageReference}
+                    </Text>
+
+                    <Text style={styles.recordSecondary}>
+                      {record.baggageId}
+                    </Text>
+
+                    <Text style={styles.recordStatus}>
+                      {record.status}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+
+            {registered.map((record) => (
+              <BaggageQrCard
+                key={`qr-${record.id}`}
+                record={record}
+                title={record.baggageReference}
+              />
+            ))}
 
             <TouchableOpacity
               style={styles.primaryButton}
-              onPress={registerAnother}
+              onPress={registerAnotherBatch}
             >
-              <Text style={styles.primaryButtonText}>Register another bag</Text>
+              <Text style={styles.primaryButtonText}>
+                Create another operation
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.textButton} onPress={onBack}>
-              <Text style={styles.textButtonText}>Done, back to baggage</Text>
+              <Text style={styles.textButtonText}>
+                Done, back to baggage
+              </Text>
             </TouchableOpacity>
           </>
         ) : (
           <View style={styles.card}>
             <Text style={styles.label}>Flight Number</Text>
+
             <TextInput
               style={styles.input}
               placeholder="e.g. KQ100"
@@ -179,30 +239,38 @@ export default function RegisterBaggageScreen({
               editable={!registering}
             />
 
-            <Text style={styles.label}>Baggage Reference</Text>
+            <Text style={styles.label}>Number of Bags</Text>
+
             <TextInput
               style={styles.input}
-              placeholder="e.g. BAG001"
+              placeholder="e.g. 25"
               placeholderTextColor="#8A94A6"
-              value={baggageReference}
-              onChangeText={setBaggageReference}
-              autoCapitalize="characters"
+              value={bagCount}
+              onChangeText={setBagCount}
+              keyboardType="number-pad"
               autoCorrect={false}
               editable={!registering}
               returnKeyType="done"
-              onSubmitEditing={registerBaggage}
+              onSubmitEditing={registerBaggageBatch}
             />
+
+            <Text style={styles.helperText}>
+              AeroSync will generate a unique record and QR identifier for
+              each bag.
+            </Text>
 
             <TouchableOpacity
               style={[
                 styles.primaryButton,
                 registering && styles.disabledButton,
               ]}
-              onPress={registerBaggage}
+              onPress={registerBaggageBatch}
               disabled={registering}
             >
               <Text style={styles.primaryButtonText}>
-                {registering ? 'Registering…' : 'Register Baggage'}
+                {registering
+                  ? 'Creating operation…'
+                  : 'Create Baggage Operation'}
               </Text>
             </TouchableOpacity>
           </View>
@@ -212,7 +280,6 @@ export default function RegisterBaggageScreen({
   );
 }
 
-// Matches the Baggage Operations screen styling.
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -256,6 +323,12 @@ const styles = StyleSheet.create({
     },
     elevation: 2,
   },
+  cardTitle: {
+    fontSize: 19,
+    fontWeight: '800',
+    color: '#163B65',
+    marginBottom: 16,
+  },
   label: {
     fontSize: 14,
     fontWeight: '700',
@@ -272,6 +345,13 @@ const styles = StyleSheet.create({
     color: '#1E293B',
     marginBottom: 15,
     backgroundColor: '#FAFBFD',
+  },
+  helperText: {
+    fontSize: 13,
+    color: '#7A8494',
+    lineHeight: 19,
+    marginTop: -5,
+    marginBottom: 15,
   },
   primaryButton: {
     height: 48,
@@ -320,6 +400,32 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#163B65',
     textAlign: 'right',
+  },
+  recordRow: {
+    borderWidth: 1,
+    borderColor: '#E2E7EF',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+  },
+  recordMain: {
+    flex: 1,
+  },
+  recordId: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#163B65',
+    marginBottom: 4,
+  },
+  recordSecondary: {
+    fontSize: 13,
+    color: '#687386',
+    marginBottom: 5,
+  },
+  recordStatus: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#2878C8',
   },
   textButton: {
     alignItems: 'center',
