@@ -21,22 +21,27 @@ import ApprovalsScreen from './approvals';
 import BaggageScreen from './baggage';
 import CrewScreen from './crew';
 import DelayRiskScreen from './delay-risk';
+import FlightsScreen from './flights';
 import HandlerDashboard from './handler-dashboard';
+import IncidentManagementScreen from './incident-management';
 
 type DashboardScreen =
   | 'dashboard'
   | 'approvals'
   | 'baggage'
   | 'crew'
-  | 'delay-risk';
+  | 'delay-risk'
+  | 'flights'
+  | 'incident-management';
 
-const NAVY = '#163B65';
-const BLUE = '#2878C8';
-const BG = '#F4F6FA';
-const MUTED = '#64748B';
-const BORDER = '#E2E8F0';
+const RED = '#F0182B';
+const DEEP_RED = '#B51F3A';
+const BACKGROUND = '#F5F5F6';
+const TEXT = '#222222';
+const MUTED = '#737373';
+const BORDER = '#E7E7E9';
+const PALE_RED = '#FDECEF';
 const GREEN = '#16805C';
-const ORANGE = '#C96A16';
 
 export default function HomeScreen() {
   const [role, setRole] = useState('');
@@ -48,7 +53,6 @@ export default function HomeScreen() {
   const [baggageCount, setBaggageCount] = useState(0);
   const [crewCount, setCrewCount] = useState(0);
 
-  // Read only the signed-in user's profile.
   useEffect(() => {
     const user = auth.currentUser;
 
@@ -61,41 +65,51 @@ export default function HomeScreen() {
     const unsubscribe = onSnapshot(
       doc(db, 'users', user.uid),
       (snapshot) => {
-        setRole(snapshot.exists() ? snapshot.data().role ?? '' : '');
+        setRole(
+          snapshot.exists() ? snapshot.data().role ?? '' : ''
+        );
         setProfileLoading(false);
       },
       (error) => {
         console.error('Could not load user profile:', error);
         setRole('');
         setProfileLoading(false);
-      },
+      }
     );
 
     return unsubscribe;
   }, []);
 
-  // Live counts for the supervisor dashboard.
   useEffect(() => {
     if (role !== 'supervisor') {
       return;
     }
 
     const unsubscribePending = onSnapshot(
-      query(collection(db, 'users'), where('role', '==', 'pending')),
+      query(
+        collection(db, 'users'),
+        where('role', '==', 'pending')
+      ),
       (snapshot) => setPendingCount(snapshot.size),
-      (error) => console.error('Could not load pending count:', error),
+      (error) =>
+        console.error('Could not load pending count:', error)
     );
 
     const unsubscribeCrew = onSnapshot(
-      query(collection(db, 'users'), where('role', '==', 'handler')),
+      query(
+        collection(db, 'users'),
+        where('role', '==', 'handler')
+      ),
       (snapshot) => setCrewCount(snapshot.size),
-      (error) => console.error('Could not load crew count:', error),
+      (error) =>
+        console.error('Could not load crew count:', error)
     );
 
     const unsubscribeBaggage = onSnapshot(
       collection(db, 'BaggageRecords'),
       (snapshot) => setBaggageCount(snapshot.size),
-      (error) => console.error('Could not load baggage count:', error),
+      (error) =>
+        console.error('Could not load baggage count:', error)
     );
 
     return () => {
@@ -115,9 +129,7 @@ export default function HomeScreen() {
         <View style={styles.loadingLogo}>
           <Text style={styles.loadingLogoText}>A</Text>
         </View>
-
-        <ActivityIndicator size="small" color={BLUE} />
-
+        <ActivityIndicator size="large" color={RED} />
         <Text style={styles.loadingText}>
           Loading AeroSync...
         </Text>
@@ -125,7 +137,6 @@ export default function HomeScreen() {
     );
   }
 
-  // Supervisor-only screens.
   if (role === 'supervisor') {
     if (screen === 'approvals') {
       return <ApprovalsScreen onBack={goBack} />;
@@ -142,14 +153,20 @@ export default function HomeScreen() {
     if (screen === 'delay-risk') {
       return <DelayRiskScreen onBack={goBack} />;
     }
+
+    if (screen === 'flights') {
+      return <FlightsScreen onBack={goBack} />;
+    }
+
+    if (screen === 'incident-management') {
+      return <IncidentManagementScreen onBack={goBack} />;
+    }
   }
 
-  // Approved handler dashboard.
   if (role === 'handler') {
     return <HandlerDashboard />;
   }
 
-  // Pending or unrecognized account.
   if (role !== 'supervisor') {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -161,11 +178,10 @@ export default function HomeScreen() {
             <View style={styles.brandMark}>
               <Text style={styles.brandMarkText}>A</Text>
             </View>
-
             <View>
               <Text style={styles.brandName}>AeroSync</Text>
               <Text style={styles.brandSubtext}>
-                Ground operations
+                KENYA AIRWAYS · GROUND OPERATIONS
               </Text>
             </View>
           </View>
@@ -174,11 +190,9 @@ export default function HomeScreen() {
             <View style={styles.pendingIcon}>
               <Text style={styles.pendingIconText}>⏳</Text>
             </View>
-
             <Text style={styles.pendingTitle}>
               Account pending approval
             </Text>
-
             <Text style={styles.pendingSubtitle}>
               Your account has not been approved for operational
               access yet. Please contact your supervisor.
@@ -187,13 +201,11 @@ export default function HomeScreen() {
 
           <View style={styles.infoCard}>
             <Text style={styles.cardEyebrow}>ACCOUNT</Text>
-
             <Text style={styles.cardTitle}>
               {auth.currentUser?.displayName ||
                 auth.currentUser?.email ||
                 'Signed-in user'}
             </Text>
-
             <View style={styles.accountStatusRow}>
               <View style={styles.pendingDot} />
               <Text style={styles.accountStatusText}>
@@ -203,7 +215,7 @@ export default function HomeScreen() {
           </View>
 
           <Text style={styles.footer}>
-            AeroSync · Ground crew coordination
+            AEROSYNC · GROUND OPERATIONS
           </Text>
         </ScrollView>
       </SafeAreaView>
@@ -211,7 +223,8 @@ export default function HomeScreen() {
   }
 
   const supervisorName =
-    auth.currentUser?.displayName?.split(' ')[0] || 'Supervisor';
+    auth.currentUser?.displayName?.split(' ')[0] ||
+    'Supervisor';
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -219,17 +232,16 @@ export default function HomeScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
+        {/* Brand header */}
         <View style={styles.headerRow}>
           <View style={styles.headerBrand}>
             <View style={styles.brandMarkSmall}>
               <Text style={styles.brandMarkSmallText}>A</Text>
             </View>
-
             <View>
               <Text style={styles.brandNameSmall}>AeroSync</Text>
               <Text style={styles.headerRole}>
-                SUPERVISOR
+                KENYA AIRWAYS · SUPERVISOR
               </Text>
             </View>
           </View>
@@ -245,24 +257,21 @@ export default function HomeScreen() {
           <Text style={styles.greeting}>
             Good to see you, {supervisorName}.
           </Text>
-
           <Text style={styles.subtitle}>
             Here's your ground operations overview.
           </Text>
         </View>
 
-        {/* Main operations hero */}
+        {/* Red operations banner */}
         <View style={styles.heroCard}>
           <View style={styles.heroTop}>
             <View style={styles.heroTextBlock}>
               <Text style={styles.heroEyebrow}>
                 OPERATIONS CONTROL
               </Text>
-
               <Text style={styles.heroTitle}>
                 Keep the operation moving.
               </Text>
-
               <Text style={styles.heroSubtitle}>
                 Monitor crew coordination, baggage activity and
                 staff readiness from one place.
@@ -277,10 +286,8 @@ export default function HomeScreen() {
           <View style={styles.heroDivider} />
 
           <View style={styles.heroFooter}>
-            <View>
-              <Text style={styles.heroMetricLabel}>
-                ACTIVE HANDLERS
-              </Text>
+            <View style={styles.heroMetric}>
+              <Text style={styles.heroMetricLabel}>HANDLERS</Text>
               <Text style={styles.heroMetricValue}>
                 {crewCount}
               </Text>
@@ -288,10 +295,8 @@ export default function HomeScreen() {
 
             <View style={styles.heroMetricDivider} />
 
-            <View>
-              <Text style={styles.heroMetricLabel}>
-                BAGGAGE RECORDS
-              </Text>
+            <View style={styles.heroMetric}>
+              <Text style={styles.heroMetricLabel}>BAGGAGE</Text>
               <Text style={styles.heroMetricValue}>
                 {baggageCount}
               </Text>
@@ -299,10 +304,8 @@ export default function HomeScreen() {
 
             <View style={styles.heroMetricDivider} />
 
-            <View>
-              <Text style={styles.heroMetricLabel}>
-                APPROVALS
-              </Text>
+            <View style={styles.heroMetric}>
+              <Text style={styles.heroMetricLabel}>APPROVALS</Text>
               <Text style={styles.heroMetricValue}>
                 {pendingCount}
               </Text>
@@ -310,7 +313,7 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Attention */}
+        {/* Action required */}
         {pendingCount > 0 && (
           <Pressable
             style={({ pressed }) => [
@@ -322,34 +325,28 @@ export default function HomeScreen() {
             <View style={styles.attentionIcon}>
               <Text style={styles.attentionIconText}>!</Text>
             </View>
-
             <View style={styles.attentionInfo}>
               <Text style={styles.attentionTitle}>
                 Action required
               </Text>
-
               <Text style={styles.attentionText}>
                 {pendingCount === 1
                   ? '1 staff application is waiting for review.'
                   : `${pendingCount} staff applications are waiting for review.`}
               </Text>
             </View>
-
             <Text style={styles.attentionArrow}>›</Text>
           </Pressable>
         )}
 
-        {/* Overview */}
+        {/* Summary cards */}
         <View style={styles.sectionHeader}>
-          <View>
-            <Text style={styles.sectionTitle}>
-              Operations overview
-            </Text>
-
-            <Text style={styles.sectionSubtitle}>
-              Live activity across AeroSync
-            </Text>
-          </View>
+          <Text style={styles.sectionTitle}>
+            Today's overview
+          </Text>
+          <Text style={styles.sectionSubtitle}>
+            Live records from AeroSync
+          </Text>
         </View>
 
         <View style={styles.statsGrid}>
@@ -358,34 +355,14 @@ export default function HomeScreen() {
               styles.statCard,
               pressed && styles.pressed,
             ]}
-            onPress={() => setScreen('approvals')}
+            onPress={() => setScreen('crew')}
           >
-            <View
-              style={[
-                styles.statIcon,
-                {
-                  backgroundColor: '#FFF4E8',
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.statIconText,
-                  {
-                    color: ORANGE,
-                  },
-                ]}
-              >
-                ✓
-              </Text>
+            <View style={styles.statIcon}>
+              <Text style={styles.statIconText}>♧</Text>
             </View>
-
-            <Text style={styles.statNumber}>
-              {pendingCount}
-            </Text>
-
+            <Text style={styles.statNumber}>{crewCount}</Text>
             <Text style={styles.statLabel}>
-              Pending approvals
+              Approved handlers
             </Text>
           </Pressable>
 
@@ -399,11 +376,7 @@ export default function HomeScreen() {
             <View style={styles.statIcon}>
               <Text style={styles.statIconText}>▣</Text>
             </View>
-
-            <Text style={styles.statNumber}>
-              {baggageCount}
-            </Text>
-
+            <Text style={styles.statNumber}>{baggageCount}</Text>
             <Text style={styles.statLabel}>
               Baggage records
             </Text>
@@ -414,131 +387,78 @@ export default function HomeScreen() {
               styles.statCard,
               pressed && styles.pressed,
             ]}
-            onPress={() => setScreen('crew')}
+            onPress={() => setScreen('approvals')}
           >
-            <View
-              style={[
-                styles.statIcon,
-                {
-                  backgroundColor: '#EAF7F2',
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.statIconText,
-                  {
-                    color: GREEN,
-                  },
-                ]}
-              >
-                ♧
-              </Text>
+            <View style={styles.statIcon}>
+              <Text style={styles.statIconText}>✓</Text>
             </View>
-
-            <Text style={styles.statNumber}>
-              {crewCount}
-            </Text>
-
+            <Text style={styles.statNumber}>{pendingCount}</Text>
             <Text style={styles.statLabel}>
-              Approved handlers
+              Pending approvals
             </Text>
           </Pressable>
 
           <View style={styles.statCard}>
-            <View
-              style={[
-                styles.statIcon,
-                {
-                  backgroundColor: '#F1F5F9',
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.statIconText,
-                  {
-                    color: MUTED,
-                  },
-                ]}
-              >
-                !
-              </Text>
+            <View style={styles.statIcon}>
+              <Text style={styles.statIconText}>!</Text>
             </View>
-
             <Text style={styles.statNumber}>—</Text>
-
-            <Text style={styles.statLabel}>
-              Open incidents
-            </Text>
-
-            <Text style={styles.comingSoon}>
-              Monitoring
-            </Text>
+            <Text style={styles.statLabel}>Open incidents</Text>
+            <Text style={styles.comingSoon}>Not connected yet</Text>
           </View>
         </View>
 
-        {/* Management */}
+        {/* Operational shortcuts */}
         <View style={styles.sectionHeader}>
-          <View>
-            <Text style={styles.sectionTitle}>
-              Manage operations
-            </Text>
-
-            <Text style={styles.sectionSubtitle}>
-              Access your operational workspaces
-            </Text>
-          </View>
+          <Text style={styles.sectionTitle}>
+            Operations management
+          </Text>
+          <Text style={styles.sectionSubtitle}>
+            Choose a workspace to continue
+          </Text>
         </View>
 
         <View style={styles.actionList}>
+          {/* Flight management */}
           <Pressable
             style={({ pressed }) => [
               styles.actionCard,
               pressed && styles.pressed,
             ]}
-            onPress={() => setScreen('approvals')}
+            onPress={() => setScreen('flights')}
           >
-            <View
-              style={[
-                styles.actionIcon,
-                {
-                  backgroundColor: '#FFF4E8',
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.actionIconText,
-                  {
-                    color: ORANGE,
-                  },
-                ]}
-              >
-                ✓
-              </Text>
+            <View style={styles.actionIcon}>
+              <Text style={styles.actionIconText}>✈</Text>
             </View>
-
             <View style={styles.actionInfo}>
-              <View style={styles.actionTitleRow}>
-                <Text style={styles.actionTitle}>
-                  Staff approvals
-                </Text>
-
-                {pendingCount > 0 && (
-                  <View style={styles.actionBadge}>
-                    <Text style={styles.actionBadgeText}>
-                      {pendingCount}
-                    </Text>
-                  </View>
-                )}
-              </View>
-
+              <Text style={styles.actionTitle}>
+                Flight management
+              </Text>
               <Text style={styles.actionDescription}>
-                Review and approve eligible handler applications.
+                Create flights and load sample demo flights.
               </Text>
             </View>
+            <Text style={styles.actionArrow}>›</Text>
+          </Pressable>
 
+          <Pressable
+            style={({ pressed }) => [
+              styles.actionCard,
+              pressed && styles.pressed,
+            ]}
+            onPress={() => setScreen('crew')}
+          >
+            <View style={styles.actionIcon}>
+              <Text style={styles.actionIconText}>♧</Text>
+            </View>
+            <View style={styles.actionInfo}>
+              <Text style={styles.actionTitle}>
+                Crew coordination
+              </Text>
+              <Text style={styles.actionDescription}>
+                Manage handlers, shifts and assignments.
+              </Text>
+            </View>
             <Text style={styles.actionArrow}>›</Text>
           </Pressable>
 
@@ -552,57 +472,14 @@ export default function HomeScreen() {
             <View style={styles.actionIcon}>
               <Text style={styles.actionIconText}>▣</Text>
             </View>
-
             <View style={styles.actionInfo}>
               <Text style={styles.actionTitle}>
-                Baggage operations
+                Baggage tracking
               </Text>
-
               <Text style={styles.actionDescription}>
-                View baggage records, flights and handling status.
+                Review baggage records and handling status.
               </Text>
             </View>
-
-            <Text style={styles.actionArrow}>›</Text>
-          </Pressable>
-
-          <Pressable
-            style={({ pressed }) => [
-              styles.actionCard,
-              pressed && styles.pressed,
-            ]}
-            onPress={() => setScreen('crew')}
-          >
-            <View
-              style={[
-                styles.actionIcon,
-                {
-                  backgroundColor: '#EAF7F2',
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.actionIconText,
-                  {
-                    color: GREEN,
-                  },
-                ]}
-              >
-                ♧
-              </Text>
-            </View>
-
-            <View style={styles.actionInfo}>
-              <Text style={styles.actionTitle}>
-                Crew coordination
-              </Text>
-
-              <Text style={styles.actionDescription}>
-                Manage handlers, flights, shifts and assignments.
-              </Text>
-            </View>
-
             <Text style={styles.actionArrow}>›</Text>
           </Pressable>
 
@@ -613,53 +490,84 @@ export default function HomeScreen() {
             ]}
             onPress={() => setScreen('delay-risk')}
           >
-            <View
-              style={[
-                styles.actionIcon,
-                {
-                  backgroundColor: '#F1F5F9',
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.actionIconText,
-                  {
-                    color: NAVY,
-                  },
-                ]}
-              >
-                !
-              </Text>
+            <View style={styles.actionIcon}>
+              <Text style={styles.actionIconText}>!</Text>
             </View>
-
             <View style={styles.actionInfo}>
               <Text style={styles.actionTitle}>
                 Delay-risk monitoring
               </Text>
-
               <Text style={styles.actionDescription}>
-                Assess operational warning indicators and delay risk.
+                Review operational indicators and delay risks.
               </Text>
             </View>
+            <Text style={styles.actionArrow}>›</Text>
+          </Pressable>
 
+          {/* Incident management */}
+          <Pressable
+            style={({ pressed }) => [
+              styles.actionCard,
+              pressed && styles.pressed,
+            ]}
+            onPress={() => setScreen('incident-management')}
+          >
+            <View style={styles.actionIcon}>
+              <Text style={styles.actionIconText}>!</Text>
+            </View>
+            <View style={styles.actionInfo}>
+              <Text style={styles.actionTitle}>
+                Incident management
+              </Text>
+              <Text style={styles.actionDescription}>
+                Review reports, investigate incidents and manage closure.
+              </Text>
+            </View>
+            <Text style={styles.actionArrow}>›</Text>
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.actionCard,
+              pressed && styles.pressed,
+            ]}
+            onPress={() => setScreen('approvals')}
+          >
+            <View style={styles.actionIcon}>
+              <Text style={styles.actionIconText}>✓</Text>
+            </View>
+            <View style={styles.actionInfo}>
+              <View style={styles.actionTitleRow}>
+                <Text style={styles.actionTitle}>
+                  Staff approvals
+                </Text>
+                {pendingCount > 0 && (
+                  <View style={styles.actionBadge}>
+                    <Text style={styles.actionBadgeText}>
+                      {pendingCount}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <Text style={styles.actionDescription}>
+                Review pending handler applications.
+              </Text>
+            </View>
             <Text style={styles.actionArrow}>›</Text>
           </Pressable>
         </View>
 
-        {/* Account */}
+        {/* Account information */}
         <View style={styles.accountCard}>
           <View style={styles.accountAvatar}>
             <Text style={styles.accountAvatarText}>
               {supervisorName.charAt(0).toUpperCase()}
             </Text>
           </View>
-
           <View style={styles.accountInfo}>
             <Text style={styles.accountLabel}>
               SUPERVISOR ACCOUNT
             </Text>
-
             <Text style={styles.accountEmail}>
               {auth.currentUser?.email || 'Supervisor account'}
             </Text>
@@ -667,7 +575,7 @@ export default function HomeScreen() {
         </View>
 
         <Text style={styles.footer}>
-          AeroSync · Ground crew coordination
+          AEROSYNC · KENYA AIRWAYS GROUND OPERATIONS
         </Text>
       </ScrollView>
     </SafeAreaView>
@@ -677,12 +585,12 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: BG,
+    backgroundColor: BACKGROUND,
   },
 
   loadingScreen: {
     flex: 1,
-    backgroundColor: BG,
+    backgroundColor: BACKGROUND,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 12,
@@ -692,7 +600,7 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 16,
-    backgroundColor: NAVY,
+    backgroundColor: RED,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 4,
@@ -705,67 +613,64 @@ const styles = StyleSheet.create({
   },
 
   loadingText: {
-    color: NAVY,
+    color: TEXT,
     fontSize: 14,
   },
 
   content: {
-    padding: 20,
-    paddingBottom: 42,
+    paddingHorizontal: 18,
+    paddingTop: 12,
+    paddingBottom: 30,
     width: '100%',
-    maxWidth: 900,
     alignSelf: 'center',
   },
 
   pendingContent: {
     padding: 22,
     paddingBottom: 40,
-    width: '100%',
-    maxWidth: 900,
-    alignSelf: 'center',
   },
 
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 6,
-    marginBottom: 24,
+    marginBottom: 22,
   },
 
   headerBrand: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    flexShrink: 1,
   },
 
   brandMarkSmall: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    backgroundColor: NAVY,
+    width: 42,
+    height: 42,
+    borderRadius: 13,
+    backgroundColor: RED,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   brandMarkSmallText: {
     color: '#FFFFFF',
-    fontSize: 20,
-    fontWeight: '800',
+    fontSize: 23,
+    fontWeight: '900',
   },
 
   brandNameSmall: {
-    color: NAVY,
-    fontSize: 17,
-    fontWeight: '800',
+    color: TEXT,
+    fontSize: 19,
+    fontWeight: '900',
   },
 
   headerRole: {
-    color: BLUE,
+    color: DEEP_RED,
     fontSize: 9,
     fontWeight: '800',
-    letterSpacing: 1.1,
-    marginTop: 1,
+    letterSpacing: 0.6,
+    marginTop: 2,
   },
 
   liveIndicator: {
@@ -773,9 +678,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 7,
     borderRadius: 20,
-    backgroundColor: '#EAF7F2',
+    backgroundColor: '#E8F5EF',
   },
 
   liveDot: {
@@ -789,7 +694,7 @@ const styles = StyleSheet.create({
     color: GREEN,
     fontSize: 10,
     fontWeight: '800',
-    letterSpacing: 0.8,
+    letterSpacing: 0.5,
   },
 
   greetingBlock: {
@@ -797,10 +702,10 @@ const styles = StyleSheet.create({
   },
 
   greeting: {
-    color: NAVY,
-    fontSize: 27,
-    lineHeight: 34,
-    fontWeight: '800',
+    color: TEXT,
+    fontSize: 26,
+    lineHeight: 33,
+    fontWeight: '900',
   },
 
   subtitle: {
@@ -811,10 +716,10 @@ const styles = StyleSheet.create({
   },
 
   heroCard: {
-    backgroundColor: NAVY,
+    backgroundColor: RED,
     borderRadius: 22,
-    padding: 21,
-    marginBottom: 16,
+    padding: 20,
+    marginBottom: 18,
   },
 
   heroTop: {
@@ -824,81 +729,89 @@ const styles = StyleSheet.create({
 
   heroTextBlock: {
     flex: 1,
-    paddingRight: 12,
+    paddingRight: 8,
   },
 
   heroEyebrow: {
-    color: '#BFD7EF',
+    color: '#FFFFFF',
+    opacity: 0.9,
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: '900',
     letterSpacing: 1.1,
     marginBottom: 8,
   },
 
   heroTitle: {
     color: '#FFFFFF',
-    fontSize: 22,
-    lineHeight: 28,
-    fontWeight: '800',
+    fontSize: 23,
+    lineHeight: 29,
+    fontWeight: '900',
   },
 
   heroSubtitle: {
-    color: '#DCEBFA',
+    color: '#FFFFFF',
+    opacity: 0.95,
     fontSize: 12,
     lineHeight: 18,
     marginTop: 7,
   },
 
   planeCircle: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: 'rgba(255,255,255,0.2)',
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   planeText: {
     color: '#FFFFFF',
-    fontSize: 27,
+    fontSize: 25,
   },
 
   heroDivider: {
     height: 1,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(255,255,255,0.3)',
     marginVertical: 18,
   },
 
   heroFooter: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+
+  heroMetric: {
+    flex: 1,
+    alignItems: 'flex-start',
   },
 
   heroMetricLabel: {
-    color: '#BFD7EF',
+    color: '#FFFFFF',
     fontSize: 8,
     fontWeight: '800',
-    letterSpacing: 0.7,
+    letterSpacing: 0.4,
   },
 
   heroMetricValue: {
     color: '#FFFFFF',
-    fontSize: 21,
-    fontWeight: '800',
-    marginTop: 2,
+    fontSize: 23,
+    fontWeight: '900',
+    marginTop: 3,
   },
 
   heroMetricDivider: {
     width: 1,
-    height: 31,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    marginHorizontal: 17,
+    height: 34,
+    backgroundColor: 'rgba(255,255,255,0.35)',
+    marginHorizontal: 9,
   },
 
   attentionCard: {
-    backgroundColor: '#FFF8EF',
+    backgroundColor: '#FFF0F1',
     borderWidth: 1,
-    borderColor: '#F5D9B5',
+    borderColor: '#F5C7CC',
     borderRadius: 16,
     padding: 14,
     flexDirection: 'row',
@@ -910,15 +823,15 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: '#FFE8CB',
+    backgroundColor: '#FBD9DE',
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   attentionIconText: {
-    color: ORANGE,
+    color: DEEP_RED,
     fontSize: 20,
-    fontWeight: '800',
+    fontWeight: '900',
   },
 
   attentionInfo: {
@@ -928,39 +841,39 @@ const styles = StyleSheet.create({
   },
 
   attentionTitle: {
-    color: '#8A4A0A',
+    color: DEEP_RED,
     fontSize: 14,
     fontWeight: '800',
   },
 
   attentionText: {
-    color: '#9A6A3B',
+    color: '#8B414A',
     fontSize: 11,
     lineHeight: 16,
-    marginTop: 2,
+    marginTop: 3,
   },
 
   attentionArrow: {
-    color: ORANGE,
+    color: DEEP_RED,
     fontSize: 25,
     fontWeight: '700',
   },
 
   sectionHeader: {
-    marginTop: 16,
-    marginBottom: 10,
+    marginTop: 14,
+    marginBottom: 12,
   },
 
   sectionTitle: {
-    color: NAVY,
-    fontSize: 18,
-    fontWeight: '800',
+    color: TEXT,
+    fontSize: 19,
+    fontWeight: '900',
   },
 
   sectionSubtitle: {
     color: MUTED,
-    fontSize: 11,
-    marginTop: 3,
+    fontSize: 12,
+    marginTop: 4,
   },
 
   statsGrid: {
@@ -970,52 +883,52 @@ const styles = StyleSheet.create({
   },
 
   statCard: {
-    width: '47%',
+    width: '48%',
     flexGrow: 1,
-    minWidth: 135,
+    minWidth: 130,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: BORDER,
-    borderRadius: 16,
+    borderRadius: 17,
     padding: 15,
   },
 
   statIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    backgroundColor: '#EAF2FC',
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: PALE_RED,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 10,
   },
 
   statIconText: {
-    color: BLUE,
-    fontSize: 17,
-    fontWeight: '800',
+    color: DEEP_RED,
+    fontSize: 20,
+    fontWeight: '900',
   },
 
   statNumber: {
-    color: NAVY,
-    fontSize: 27,
-    fontWeight: '800',
+    color: TEXT,
+    fontSize: 28,
+    fontWeight: '900',
   },
 
   statLabel: {
     color: MUTED,
-    fontSize: 11,
-    lineHeight: 16,
-    marginTop: 2,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 3,
   },
 
   comingSoon: {
-    color: MUTED,
+    color: DEEP_RED,
     fontSize: 9,
-    fontWeight: '700',
+    fontWeight: '800',
     marginTop: 7,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 0.4,
   },
 
   actionList: {
@@ -1033,18 +946,18 @@ const styles = StyleSheet.create({
   },
 
   actionIcon: {
-    width: 44,
-    height: 44,
+    width: 45,
+    height: 45,
     borderRadius: 13,
-    backgroundColor: '#EAF2FC',
+    backgroundColor: PALE_RED,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   actionIconText: {
-    color: BLUE,
-    fontSize: 21,
-    fontWeight: '800',
+    color: DEEP_RED,
+    fontSize: 22,
+    fontWeight: '900',
   },
 
   actionInfo: {
@@ -1057,10 +970,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
+    flexWrap: 'wrap',
   },
 
   actionTitle: {
-    color: NAVY,
+    color: TEXT,
     fontSize: 14,
     fontWeight: '800',
   },
@@ -1077,20 +991,20 @@ const styles = StyleSheet.create({
     height: 21,
     paddingHorizontal: 6,
     borderRadius: 11,
-    backgroundColor: '#FFF0DC',
+    backgroundColor: PALE_RED,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   actionBadgeText: {
-    color: ORANGE,
+    color: DEEP_RED,
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: '900',
   },
 
   actionArrow: {
-    color: BLUE,
-    fontSize: 25,
+    color: DEEP_RED,
+    fontSize: 26,
     fontWeight: '700',
   },
 
@@ -1106,18 +1020,18 @@ const styles = StyleSheet.create({
   },
 
   accountAvatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: NAVY,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: RED,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   accountAvatarText: {
     color: '#FFFFFF',
-    fontSize: 17,
-    fontWeight: '800',
+    fontSize: 18,
+    fontWeight: '900',
   },
 
   accountInfo: {
@@ -1126,16 +1040,16 @@ const styles = StyleSheet.create({
   },
 
   accountLabel: {
-    color: BLUE,
+    color: DEEP_RED,
     fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.8,
+    fontWeight: '900',
+    letterSpacing: 0.7,
   },
 
   accountEmail: {
     color: MUTED,
     fontSize: 12,
-    marginTop: 3,
+    marginTop: 4,
   },
 
   pressed: {
@@ -1155,7 +1069,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 14,
-    backgroundColor: NAVY,
+    backgroundColor: RED,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1163,19 +1077,20 @@ const styles = StyleSheet.create({
   brandMarkText: {
     color: '#FFFFFF',
     fontSize: 23,
-    fontWeight: '800',
+    fontWeight: '900',
   },
 
   brandName: {
-    color: NAVY,
+    color: TEXT,
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '900',
   },
 
   brandSubtext: {
-    color: MUTED,
-    fontSize: 10,
-    marginTop: 2,
+    color: DEEP_RED,
+    fontSize: 9,
+    fontWeight: '700',
+    marginTop: 3,
   },
 
   pendingHero: {
@@ -1188,7 +1103,7 @@ const styles = StyleSheet.create({
     width: 70,
     height: 70,
     borderRadius: 24,
-    backgroundColor: '#FFF4E8',
+    backgroundColor: PALE_RED,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 18,
@@ -1199,9 +1114,9 @@ const styles = StyleSheet.create({
   },
 
   pendingTitle: {
-    color: NAVY,
+    color: TEXT,
     fontSize: 24,
-    fontWeight: '800',
+    fontWeight: '900',
     textAlign: 'center',
   },
 
@@ -1222,15 +1137,15 @@ const styles = StyleSheet.create({
   },
 
   cardEyebrow: {
-    color: BLUE,
-    fontSize: 9,
-    fontWeight: '800',
+    color: DEEP_RED,
+    fontSize: 10,
+    fontWeight: '900',
     letterSpacing: 1,
     marginBottom: 7,
   },
 
   cardTitle: {
-    color: NAVY,
+    color: TEXT,
     fontSize: 15,
     fontWeight: '800',
   },
@@ -1246,7 +1161,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: ORANGE,
+    backgroundColor: RED,
   },
 
   accountStatusText: {
@@ -1257,7 +1172,9 @@ const styles = StyleSheet.create({
   footer: {
     textAlign: 'center',
     color: MUTED,
-    fontSize: 11,
-    marginTop: 22,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1,
+    marginTop: 24,
   },
 });

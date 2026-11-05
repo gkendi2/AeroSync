@@ -12,6 +12,8 @@ import { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
+  ImageBackground,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -20,75 +22,21 @@ import {
   Text,
   TextInput,
   View,
-  type TextStyle,
-  type ViewStyle,
 } from 'react-native';
 
 export type Role = 'pending' | 'handler' | 'supervisor';
 type RequestedRole = 'handler' | 'supervisor';
 
-type Styles = {
-  screen: ViewStyle;
-  scrollContent: ViewStyle;
-  card: ViewStyle;
-  brandSection: ViewStyle;
-  logoCircle: ViewStyle;
-  logoText: TextStyle;
-  brand: TextStyle;
-  subtitle: TextStyle;
-  headingSection: ViewStyle;
-  heading: TextStyle;
-  headingSubtitle: TextStyle;
-  registrationSection: ViewStyle;
-  sectionLabel: TextStyle;
-  sectionHint: TextStyle;
-  roleOptions: ViewStyle;
-  roleCard: ViewStyle;
-  roleCardSelected: ViewStyle;
-  roleIconContainer: ViewStyle;
-  roleIconContainerSelected: ViewStyle;
-  roleIcon: TextStyle;
-  roleTitle: TextStyle;
-  roleDescription: TextStyle;
-  selectedText: TextStyle;
-  approvalInfo: ViewStyle;
-  approvalInfoTitle: TextStyle;
-  approvalInfoText: TextStyle;
-  fieldGroup: ViewStyle;
-  labelRow: ViewStyle;
-  fieldLabel: TextStyle;
-  forgotText: TextStyle;
-  input: TextStyle;
-  passwordContainer: ViewStyle;
-  passwordInput: TextStyle;
-  visibilityButton: ViewStyle;
-  visibilityText: TextStyle;
-  passwordHint: TextStyle;
-  primaryButton: ViewStyle;
-  primaryButtonText: TextStyle;
-  disabled: ViewStyle;
-  switchButton: ViewStyle;
-  switchPrompt: TextStyle;
-  switchText: TextStyle;
-  bottomNotice: ViewStyle;
-  bottomNoticeTitle: TextStyle;
-  bottomNoticeText: TextStyle;
-};
-
 export default function AuthScreen() {
   const [isRegistering, setIsRegistering] = useState(false);
-
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-
   const [requestedRole, setRequestedRole] =
     useState<RequestedRole>('handler');
-
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-
   const [loading, setLoading] = useState(false);
   const [resettingPassword, setResettingPassword] = useState(false);
 
@@ -115,7 +63,6 @@ export default function AuthScreen() {
 
     try {
       await sendPasswordResetEmail(auth, cleanEmail);
-
       showMessage(
         'Password reset email sent',
         'Check your email for instructions to create a new password.'
@@ -129,9 +76,9 @@ export default function AuthScreen() {
           'We could not find an account with that email address.',
         'auth/user-disabled': 'This account has been disabled.',
         'auth/too-many-requests':
-          'Too many attempts. Please wait a while before trying again.',
+          'Too many attempts. Please wait before trying again.',
         'auth/network-request-failed':
-          'Network error. Check your internet connection and try again.',
+          'Network error. Check your internet connection.',
       };
 
       showMessage(
@@ -157,10 +104,7 @@ export default function AuthScreen() {
     }
 
     if (isRegistering && !cleanName) {
-      showMessage(
-        'Missing name',
-        'Enter your full name to create your AeroSync account.'
-      );
+      showMessage('Missing name', 'Enter your full name.');
       return;
     }
 
@@ -188,31 +132,14 @@ export default function AuthScreen() {
         return;
       }
 
-      console.log('REGISTRATION: Creating Firebase Auth account...');
-
       const credential = await createUserWithEmailAndPassword(
         auth,
         cleanEmail,
         password
       );
 
-      console.log('REGISTRATION: Auth account created.', {
-        uid: credential.user.uid,
-        projectId: db.app.options.projectId,
-      });
-
-      const userRef = doc(db, 'users', credential.user.uid);
-
       try {
-        console.log('REGISTRATION: Saving Firestore profile...', {
-          uid: credential.user.uid,
-          email: cleanEmail,
-          requestedRole,
-          projectId: db.app.options.projectId,
-          collection: 'users',
-        });
-
-        await setDoc(userRef, {
+        await setDoc(doc(db, 'users', credential.user.uid), {
           uid: credential.user.uid,
           email: cleanEmail,
           displayName: cleanName,
@@ -220,20 +147,11 @@ export default function AuthScreen() {
           requestedRole,
           createdAt: serverTimestamp(),
         });
-
-        console.log(
-          'REGISTRATION: Firestore profile saved successfully.',
-          credential.user.uid
-        );
       } catch (profileError) {
-        console.error(
-          'REGISTRATION: Firestore profile save FAILED:',
-          profileError
-        );
+        console.error('Firestore profile save failed:', profileError);
 
         try {
           await deleteUser(credential.user);
-          console.log('REGISTRATION: Auth account rollback succeeded.');
         } catch (deleteError) {
           console.error('Account rollback failed:', deleteError);
 
@@ -258,21 +176,19 @@ export default function AuthScreen() {
         );
       }
 
-      const approvalMessage =
+      showMessage(
+        'Registration submitted',
         requestedRole === 'supervisor'
           ? 'Your supervisor registration request has been submitted. Supervisor access requires separate authorization.'
-          : 'Your handler registration request has been submitted. A supervisor must approve your account before you can access operational records.';
-
-      showMessage('Registration submitted', approvalMessage);
+          : 'Your handler registration request has been submitted. A supervisor must approve your account before you can access operational records.'
+      );
     } catch (error: any) {
       console.error('Authentication failed:', error);
 
       const messages: Record<string, string> = {
-        'auth/email-already-in-use':
-          'An account already uses this email.',
+        'auth/email-already-in-use': 'An account already uses this email.',
         'auth/invalid-email': 'Enter a valid email address.',
-        'auth/invalid-credential':
-          'Email or password is incorrect.',
+        'auth/invalid-credential': 'Email or password is incorrect.',
         'auth/weak-password': 'Choose a stronger password.',
         'auth/user-disabled': 'This account has been disabled.',
         'auth/too-many-requests':
@@ -280,9 +196,9 @@ export default function AuthScreen() {
         'auth/network-request-failed':
           'Network error. Check your connection and try again.',
         'permission-denied':
-          'Your profile could not be created. Please check the Firestore rules and try again.',
+          'Your profile could not be created. Check the Firestore rules and try again.',
         'firestore/permission-denied':
-          'Your profile could not be created. Please check the Firestore rules and try again.',
+          'Your profile could not be created. Check the Firestore rules and try again.',
       };
 
       showMessage(
@@ -309,631 +225,609 @@ export default function AuthScreen() {
       style={styles.screen}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
+      <ImageBackground
+        source={require('../../assets/images/Kenya Airways at Golden Hour.png')}
+        style={styles.backgroundImage}
+        resizeMode="cover"
       >
-        <View style={styles.card}>
-          <View style={styles.brandSection}>
-            <View style={styles.logoCircle}>
-              <Text style={styles.logoText}>A</Text>
-            </View>
-
-            <Text style={styles.brand}>AeroSync</Text>
-
-            <Text style={styles.subtitle}>
-              Crew coordination and operational communication
-            </Text>
-          </View>
-
-          <View style={styles.headingSection}>
-            <Text style={styles.heading}>
-              {isRegistering
-                ? 'Create your account'
-                : 'Welcome back'}
-            </Text>
-
-            <Text style={styles.headingSubtitle}>
-              {isRegistering
-                ? 'Join AeroSync and stay connected to airport operations.'
-                : 'Sign in to continue to your AeroSync workspace.'}
-            </Text>
-          </View>
-
-          {isRegistering && (
-            <View style={styles.registrationSection}>
-              <Text style={styles.sectionLabel}>Account type</Text>
-
-              <Text style={styles.sectionHint}>
-                Select the role you are requesting. Access is approved
-                separately by the system.
-              </Text>
-
-              <View style={styles.roleOptions}>
-                <Pressable
-                  style={[
-                    styles.roleCard,
-                    requestedRole === 'handler' &&
-                      styles.roleCardSelected,
-                  ]}
-                  onPress={() => setRequestedRole('handler')}
-                  disabled={loading}
-                  accessibilityRole="radio"
-                  accessibilityState={{
-                    checked: requestedRole === 'handler',
-                  }}
-                >
-                  <View
-                    style={[
-                      styles.roleIconContainer,
-                      requestedRole === 'handler' &&
-                        styles.roleIconContainerSelected,
-                    ]}
-                  >
-                    <Text style={styles.roleIcon}>H</Text>
-                  </View>
-
-                  <Text style={styles.roleTitle}>Handler</Text>
-
-                  <Text style={styles.roleDescription}>
-                    Crew activities, assigned tasks and baggage handling.
-                  </Text>
-
-                  {requestedRole === 'handler' && (
-                    <Text style={styles.selectedText}>
-                      Selected
-                    </Text>
-                  )}
-                </Pressable>
-
-                <Pressable
-                  style={[
-                    styles.roleCard,
-                    requestedRole === 'supervisor' &&
-                      styles.roleCardSelected,
-                  ]}
-                  onPress={() => setRequestedRole('supervisor')}
-                  disabled={loading}
-                  accessibilityRole="radio"
-                  accessibilityState={{
-                    checked: requestedRole === 'supervisor',
-                  }}
-                >
-                  <View
-                    style={[
-                      styles.roleIconContainer,
-                      requestedRole === 'supervisor' &&
-                        styles.roleIconContainerSelected,
-                    ]}
-                  >
-                    <Text style={styles.roleIcon}>S</Text>
-                  </View>
-
-                  <Text style={styles.roleTitle}>Supervisor</Text>
-
-                  <Text style={styles.roleDescription}>
-                    Crew coordination, approvals and operations monitoring.
-                  </Text>
-
-                  {requestedRole === 'supervisor' && (
-                    <Text style={styles.selectedText}>
-                      Selected
-                    </Text>
-                  )}
-                </Pressable>
-              </View>
-
-              <View style={styles.approvalInfo}>
-                <Text style={styles.approvalInfoTitle}>
-                  Approval required
-                </Text>
-
-                <Text style={styles.approvalInfoText}>
-                  {requestedRole === 'supervisor'
-                    ? 'Supervisor accounts require separate authorization before operational access is granted.'
-                    : 'Handler accounts remain pending until a supervisor approves the registration request.'}
-                </Text>
-              </View>
-            </View>
-          )}
-
-          {isRegistering && (
-            <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>Full name</Text>
-
-              <TextInput
-                style={styles.input}
-                placeholder="Enter your full name"
-                placeholderTextColor="#94A3B8"
-                value={displayName}
-                onChangeText={setDisplayName}
-                autoCapitalize="words"
-                editable={!loading}
-                returnKeyType="next"
+        <View style={styles.backgroundOverlay}>
+          <ScrollView
+            contentContainerStyle={[
+              styles.scrollContent,
+              isRegistering && styles.registerScrollContent,
+            ]}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.pageBrand}>
+              <Image
+                source={require('../../assets/images/Kenya Airways logo.png')}
+                style={styles.airlineLogo}
+                resizeMode="contain"
+                accessibilityLabel="Kenya Airways logo"
               />
+
+              <Text style={styles.brand}>AeroSync</Text>
+              <Text style={styles.brandSubtitle}>
+                Ground operations · Crew coordination
+              </Text>
             </View>
-          )}
 
-          <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>Email address</Text>
+            <View style={styles.card}>
+              <View style={styles.headingSection}>
+                <Text style={styles.eyebrow}>
+                  {isRegistering ? 'JOIN THE CREW' : 'CREW PORTAL'}
+                </Text>
 
-            <TextInput
-              style={styles.input}
-              placeholder="Enter your email"
-              placeholderTextColor="#94A3B8"
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              editable={!loading && !resettingPassword}
-              returnKeyType="next"
-            />
-          </View>
+                <Text style={styles.heading}>
+                  {isRegistering ? 'Create your account' : 'Welcome back'}
+                </Text>
 
-          <View style={styles.fieldGroup}>
-            <View style={styles.labelRow}>
-              <Text style={styles.fieldLabel}>Password</Text>
+                <Text style={styles.headingSubtitle}>
+                  {isRegistering
+                    ? 'Request access to the AeroSync operations platform.'
+                    : 'Sign in to continue to your operations workspace.'}
+                </Text>
+              </View>
 
-              {!isRegistering && (
-                <Pressable
-                  onPress={handleForgotPassword}
-                  disabled={loading || resettingPassword}
-                >
-                  <Text style={styles.forgotText}>
-                    {resettingPassword
-                      ? 'Sending...'
-                      : 'Forgot password?'}
-                  </Text>
-                </Pressable>
+              {isRegistering && (
+                <>
+                  <View style={styles.fieldGroup}>
+                    <Text style={styles.fieldLabel}>Full name</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Enter your full name"
+                      placeholderTextColor="#858585"
+                      value={displayName}
+                      onChangeText={setDisplayName}
+                      autoCapitalize="words"
+                      autoCorrect={false}
+                      editable={!loading}
+                      returnKeyType="next"
+                    />
+                  </View>
+
+                  <View style={styles.registrationSection}>
+                    <Text style={styles.fieldLabel}>Your role</Text>
+                    <Text style={styles.helperText}>
+                      Choose the role you are requesting.
+                    </Text>
+
+                    <View style={styles.roleRow}>
+                      <Pressable
+                        style={[
+                          styles.roleCard,
+                          requestedRole === 'handler' &&
+                            styles.roleCardSelected,
+                        ]}
+                        onPress={() => setRequestedRole('handler')}
+                        disabled={loading}
+                        accessibilityRole="radio"
+                        accessibilityState={{
+                          checked: requestedRole === 'handler',
+                        }}
+                      >
+                        <Text style={styles.roleIcon}>H</Text>
+                        <Text style={styles.roleTitle}>Handler</Text>
+                        <Text style={styles.roleDescription}>
+                          Assigned tasks and baggage handling.
+                        </Text>
+                        {requestedRole === 'handler' && (
+                          <Text style={styles.selectedLabel}>SELECTED</Text>
+                        )}
+                      </Pressable>
+
+                      <Pressable
+                        style={[
+                          styles.roleCard,
+                          requestedRole === 'supervisor' &&
+                            styles.roleCardSelected,
+                        ]}
+                        onPress={() => setRequestedRole('supervisor')}
+                        disabled={loading}
+                        accessibilityRole="radio"
+                        accessibilityState={{
+                          checked: requestedRole === 'supervisor',
+                        }}
+                      >
+                        <Text style={styles.roleIcon}>S</Text>
+                        <Text style={styles.roleTitle}>Supervisor</Text>
+                        <Text style={styles.roleDescription}>
+                          Crew coordination and operations monitoring.
+                        </Text>
+                        {requestedRole === 'supervisor' && (
+                          <Text style={styles.selectedLabel}>SELECTED</Text>
+                        )}
+                      </Pressable>
+                    </View>
+
+                    <View style={styles.approvalBox}>
+                      <Text style={styles.approvalTitle}>
+                        Access requires approval
+                      </Text>
+                      <Text style={styles.approvalText}>
+                        {requestedRole === 'supervisor'
+                          ? 'Supervisor accounts require separate authorization.'
+                          : 'Handler accounts remain pending until a supervisor approves the request.'}
+                      </Text>
+                    </View>
+                  </View>
+                </>
               )}
-            </View>
 
-            <View style={styles.passwordContainer}>
-              <TextInput
-                style={styles.passwordInput}
-                placeholder={
-                  isRegistering
-                    ? 'Create a password'
-                    : 'Enter your password'
-                }
-                placeholderTextColor="#94A3B8"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPassword}
-                autoCapitalize="none"
-                autoCorrect={false}
-                editable={!loading}
-                returnKeyType={isRegistering ? 'next' : 'done'}
-                onSubmitEditing={
-                  isRegistering ? undefined : handleSubmit
-                }
-              />
-
-              <Pressable
-                style={styles.visibilityButton}
-                onPress={() =>
-                  setShowPassword((previous) => !previous)
-                }
-                disabled={loading}
-                accessibilityRole="button"
-                accessibilityLabel={
-                  showPassword
-                    ? 'Hide password'
-                    : 'Show password'
-                }
-              >
-                <Text style={styles.visibilityText}>
-                  {showPassword ? 'Hide' : 'Show'}
-                </Text>
-              </Pressable>
-            </View>
-
-            {isRegistering && (
-              <Text style={styles.passwordHint}>
-                Use at least 8 characters.
-              </Text>
-            )}
-          </View>
-
-          {isRegistering && (
-            <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>
-                Confirm password
-              </Text>
-
-              <View style={styles.passwordContainer}>
+              <View style={styles.fieldGroup}>
+                <Text style={styles.fieldLabel}>Email address</Text>
                 <TextInput
-                  style={styles.passwordInput}
-                  placeholder="Re-enter your password"
-                  placeholderTextColor="#94A3B8"
-                  value={confirmPassword}
-                  onChangeText={setConfirmPassword}
-                  secureTextEntry={!showConfirmPassword}
+                  style={styles.input}
+                  placeholder="name@company.com"
+                  placeholderTextColor="#858585"
+                  value={email}
+                  onChangeText={setEmail}
+                  keyboardType="email-address"
                   autoCapitalize="none"
                   autoCorrect={false}
-                  editable={!loading}
-                  returnKeyType="done"
-                  onSubmitEditing={handleSubmit}
+                  autoComplete="email"
+                  editable={!loading && !resettingPassword}
+                  returnKeyType="next"
                 />
+              </View>
 
-                <Pressable
-                  style={styles.visibilityButton}
-                  onPress={() =>
-                    setShowConfirmPassword(
-                      (previous) => !previous
-                    )
-                  }
-                  disabled={loading}
-                  accessibilityRole="button"
-                  accessibilityLabel={
-                    showConfirmPassword
-                      ? 'Hide confirm password'
-                      : 'Show confirm password'
-                  }
-                >
-                  <Text style={styles.visibilityText}>
-                    {showConfirmPassword ? 'Hide' : 'Show'}
+              <View style={styles.fieldGroup}>
+                <View style={styles.labelRow}>
+                  <Text style={styles.fieldLabel}>Password</Text>
+
+                  {!isRegistering && (
+                    <Pressable
+                      onPress={handleForgotPassword}
+                      disabled={loading || resettingPassword}
+                    >
+                      <Text style={styles.forgotText}>
+                        {resettingPassword
+                          ? 'Sending...'
+                          : 'Forgot password?'}
+                      </Text>
+                    </Pressable>
+                  )}
+                </View>
+
+                <View style={styles.passwordContainer}>
+                  <TextInput
+                    style={styles.passwordInput}
+                    placeholder={
+                      isRegistering
+                        ? 'Create a password'
+                        : 'Enter your password'
+                    }
+                    placeholderTextColor="#858585"
+                    value={password}
+                    onChangeText={setPassword}
+                    secureTextEntry={!showPassword}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    autoComplete={
+                      isRegistering ? 'new-password' : 'current-password'
+                    }
+                    editable={!loading}
+                    returnKeyType={isRegistering ? 'next' : 'done'}
+                    onSubmitEditing={
+                      isRegistering ? undefined : handleSubmit
+                    }
+                  />
+
+                  <Pressable
+                    style={styles.visibilityButton}
+                    onPress={() => setShowPassword((previous) => !previous)}
+                    disabled={loading}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      showPassword ? 'Hide password' : 'Show password'
+                    }
+                  >
+                    <Text style={styles.visibilityText}>
+                      {showPassword ? 'Hide' : 'Show'}
+                    </Text>
+                  </Pressable>
+                </View>
+
+                {isRegistering && (
+                  <Text style={styles.helperText}>
+                    Use at least 8 characters.
                   </Text>
-                </Pressable>
+                )}
+              </View>
+
+              {isRegistering && (
+                <View style={styles.fieldGroup}>
+                  <Text style={styles.fieldLabel}>Confirm password</Text>
+
+                  <View style={styles.passwordContainer}>
+                    <TextInput
+                      style={styles.passwordInput}
+                      placeholder="Re-enter your password"
+                      placeholderTextColor="#858585"
+                      value={confirmPassword}
+                      onChangeText={setConfirmPassword}
+                      secureTextEntry={!showConfirmPassword}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      autoComplete="new-password"
+                      editable={!loading}
+                      returnKeyType="done"
+                      onSubmitEditing={handleSubmit}
+                    />
+
+                    <Pressable
+                      style={styles.visibilityButton}
+                      onPress={() =>
+                        setShowConfirmPassword((previous) => !previous)
+                      }
+                      disabled={loading}
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        showConfirmPassword
+                          ? 'Hide confirm password'
+                          : 'Show confirm password'
+                      }
+                    >
+                      <Text style={styles.visibilityText}>
+                        {showConfirmPassword ? 'Hide' : 'Show'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+              )}
+
+              <Pressable
+                style={[
+                  styles.primaryButton,
+                  (loading || resettingPassword) && styles.disabled,
+                ]}
+                onPress={handleSubmit}
+                disabled={loading || resettingPassword}
+                accessibilityRole="button"
+              >
+                {loading ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.primaryButtonText}>
+                    {isRegistering ? 'Create account' : 'Log in'}
+                  </Text>
+                )}
+              </Pressable>
+
+              <Pressable
+                onPress={toggleMode}
+                disabled={loading || resettingPassword}
+                style={styles.switchButton}
+                accessibilityRole="button"
+              >
+                <Text style={styles.switchPrompt}>
+                  {isRegistering
+                    ? 'Already have an account?'
+                    : "Don't have an account?"}
+                </Text>
+                <Text style={styles.switchText}>
+                  {isRegistering ? 'Log in' : 'Register'}
+                </Text>
+              </Pressable>
+
+              <View style={styles.bottomNotice}>
+                <View style={styles.securityIcon}>
+                  <Text style={styles.securityCheck}>✓</Text>
+                </View>
+
+                <View style={styles.noticeCopy}>
+                  <Text style={styles.bottomNoticeTitle}>
+                    Secure operational access
+                  </Text>
+                  <Text style={styles.bottomNoticeText}>
+                    New accounts are reviewed before access to AeroSync
+                    operational records is granted.
+                  </Text>
+                </View>
               </View>
             </View>
-          )}
 
-          <Pressable
-            style={[
-              styles.primaryButton,
-              (loading || resettingPassword) && styles.disabled,
-            ]}
-            onPress={handleSubmit}
-            disabled={loading || resettingPassword}
-          >
-            {loading ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <Text style={styles.primaryButtonText}>
-                {isRegistering
-                  ? 'Create account'
-                  : 'Log in'}
-              </Text>
-            )}
-          </Pressable>
-
-          <Pressable
-            onPress={toggleMode}
-            disabled={loading || resettingPassword}
-            style={styles.switchButton}
-          >
-            <Text style={styles.switchPrompt}>
-              {isRegistering
-                ? 'Already have an account?'
-                : "Don't have an account?"}
+            <Text style={styles.footer}>
+              AEROSYNC · GROUND OPERATIONS
             </Text>
-
-            <Text style={styles.switchText}>
-              {isRegistering ? 'Log in' : 'Register'}
-            </Text>
-          </Pressable>
-
-          <View style={styles.bottomNotice}>
-            <Text style={styles.bottomNoticeTitle}>
-              Secure operational access
-            </Text>
-
-            <Text style={styles.bottomNoticeText}>
-              New accounts are reviewed before access to AeroSync
-              operational records is granted.
-            </Text>
-          </View>
+          </ScrollView>
         </View>
-      </ScrollView>
+      </ImageBackground>
     </KeyboardAvoidingView>
   );
 }
 
-const styles = StyleSheet.create<Styles>({
+const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#F4F6FA',
+    backgroundColor: '#20232B',
   },
-
+  backgroundImage: {
+    flex: 1,
+    width: '100%',
+  },
+  backgroundOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(10, 15, 25, 0.25)',
+  },
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
-    padding: 20,
+    paddingHorizontal: 18,
+    paddingTop: 12,
+    paddingBottom: 10,
   },
-
-  card: {
+  registerScrollContent: {
+    justifyContent: 'flex-start',
+    paddingTop: 28,
+    paddingBottom: 24,
+  },
+  pageBrand: {
     width: '100%',
-    maxWidth: 460,
+    maxWidth: 420,
     alignSelf: 'center',
-    backgroundColor: '#FFFFFF',
-    padding: 24,
-    borderRadius: 22,
-    gap: 18,
-    shadowColor: '#163B65',
-    shadowOffset: {
-      width: 0,
-      height: 6,
-    },
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    elevation: 4,
-  },
-
-  brandSection: {
-    alignItems: 'center',
-    gap: 7,
-  },
-
-  logoCircle: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    backgroundColor: '#163B65',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 2,
-  },
-
-  logoText: {
-    color: '#FFFFFF',
-    fontSize: 27,
-    fontWeight: '800',
-  },
-
-  brand: {
-    fontSize: 30,
-    fontWeight: '800',
-    color: '#163B65',
-  },
-
-  subtitle: {
-    textAlign: 'center',
-    color: '#64748B',
-    fontSize: 13,
-    lineHeight: 19,
-    maxWidth: 310,
-  },
-
-  headingSection: {
-    marginTop: 2,
-    gap: 5,
-  },
-
-  heading: {
-    fontSize: 23,
-    fontWeight: '700',
-    color: '#172033',
-  },
-
-  headingSubtitle: {
-    fontSize: 13,
-    lineHeight: 19,
-    color: '#64748B',
-  },
-
-  registrationSection: {
-    gap: 9,
-  },
-
-  sectionLabel: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#172033',
-  },
-
-  sectionHint: {
-    fontSize: 12,
-    lineHeight: 17,
-    color: '#64748B',
-    marginBottom: 2,
-  },
-
-  roleOptions: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-
-  roleCard: {
-    flex: 1,
-    minHeight: 175,
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-    borderRadius: 14,
-    padding: 14,
-    alignItems: 'center',
-    gap: 7,
-    backgroundColor: '#FFFFFF',
-  },
-
-  roleCardSelected: {
-    borderColor: '#2878C8',
-    borderWidth: 2,
-    backgroundColor: '#EFF6FF',
-  },
-
-  roleIconContainer: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#EEF2F7',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 2,
-  },
-
-  roleIconContainerSelected: {
-    backgroundColor: '#DCEEFF',
-  },
-
-  roleIcon: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#163B65',
-  },
-
-  roleTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#163B65',
-  },
-
-  roleDescription: {
-    fontSize: 11,
-    lineHeight: 16,
-    textAlign: 'center',
-    color: '#64748B',
-  },
-
-  selectedText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#2878C8',
-    marginTop: 'auto',
-  },
-
-  approvalInfo: {
-    backgroundColor: '#F4F7FB',
-    borderRadius: 10,
-    padding: 11,
+    paddingHorizontal: 4,
+    paddingBottom: 10,
     gap: 3,
   },
-
-  approvalInfoTitle: {
+  airlineLogo: {
+    width: 300,
+    height: 90,
+    marginBottom: 8,
+    marginRight: 'auto',
+    alignSelf: 'flex-start',
+  },
+  brand: {
+    color: '#FFFFFF',
+    fontSize: 28,
+    fontWeight: '900',
+    letterSpacing: -0.5,
+  },
+  brandSubtitle: {
+    color: '#FFFFFF',
     fontSize: 12,
-    fontWeight: '700',
-    color: '#163B65',
+    lineHeight: 17,
   },
-
-  approvalInfoText: {
-    fontSize: 11,
-    lineHeight: 16,
-    color: '#64748B',
+  card: {
+    width: '100%',
+    maxWidth: 420,
+    alignSelf: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 10,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 7 },
+    shadowOpacity: 0.18,
+    shadowRadius: 14,
+    elevation: 7,
   },
-
+  headingSection: {
+    gap: 4,
+  },
+  eyebrow: {
+    color: '#C8102E',
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 1.6,
+  },
+  heading: {
+    color: '#151515',
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: -0.4,
+  },
+  headingSubtitle: {
+    color: '#6B6B6B',
+    fontSize: 12,
+    lineHeight: 17,
+  },
   fieldGroup: {
-    gap: 7,
+    gap: 5,
   },
-
+  fieldLabel: {
+    color: '#292929',
+    fontSize: 12,
+    fontWeight: '800',
+  },
   labelRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 8,
   },
-
-  fieldLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#334155',
-  },
-
-  forgotText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#2878C8',
-  },
-
   input: {
+    minHeight: 42,
     borderWidth: 1,
-    borderColor: '#CBD5E1',
-    borderRadius: 11,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    fontSize: 16,
-    color: '#172033',
+    borderColor: '#D6D6D6',
+    borderRadius: 9,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    fontSize: 14,
+    color: '#171717',
     backgroundColor: '#FFFFFF',
   },
-
   passwordContainer: {
+    minHeight: 42,
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#CBD5E1',
-    borderRadius: 11,
+    borderColor: '#D6D6D6',
+    borderRadius: 9,
     backgroundColor: '#FFFFFF',
   },
-
   passwordInput: {
     flex: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    fontSize: 16,
-    color: '#172033',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    fontSize: 14,
+    color: '#171717',
   },
-
   visibilityButton: {
-    paddingHorizontal: 13,
-    paddingVertical: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
   },
-
   visibilityText: {
+    color: '#C8102E',
     fontSize: 12,
-    fontWeight: '700',
-    color: '#2878C8',
+    fontWeight: '800',
   },
-
-  passwordHint: {
+  forgotText: {
+    color: '#C8102E',
     fontSize: 11,
-    color: '#64748B',
+    fontWeight: '800',
   },
-
-  primaryButton: {
-    backgroundColor: '#163B65',
-    borderRadius: 11,
-    paddingVertical: 15,
+  helperText: {
+    color: '#6B6B6B',
+    fontSize: 10,
+    lineHeight: 15,
+  },
+  registrationSection: {
+    gap: 8,
+  },
+  roleRow: {
+    flexDirection: 'row',
+    gap: 9,
+  },
+  roleCard: {
+    flex: 1,
+    minHeight: 145,
+    borderWidth: 1,
+    borderColor: '#D6D6D6',
+    borderRadius: 12,
+    padding: 9,
     alignItems: 'center',
-    marginTop: 2,
+    gap: 6,
+    backgroundColor: '#FFFFFF',
   },
-
+  roleCardSelected: {
+    borderColor: '#ED1C24',
+    borderWidth: 2,
+    backgroundColor: '#FFF4F4',
+  },
+  roleIcon: {
+    width: 34,
+    height: 34,
+    lineHeight: 34,
+    textAlign: 'center',
+    overflow: 'hidden',
+    borderRadius: 17,
+    backgroundColor: '#FFE3E5',
+    color: '#C8102E',
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  roleTitle: {
+    color: '#242424',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  roleDescription: {
+    color: '#666666',
+    fontSize: 10,
+    lineHeight: 14,
+    textAlign: 'center',
+  },
+  selectedLabel: {
+    color: '#C8102E',
+    fontSize: 8,
+    fontWeight: '900',
+    letterSpacing: 0.7,
+    marginTop: 'auto',
+  },
+  approvalBox: {
+    backgroundColor: '#F7F7F7',
+    borderLeftWidth: 3,
+    borderLeftColor: '#ED1C24',
+    padding: 10,
+    borderRadius: 8,
+    gap: 4,
+  },
+  approvalTitle: {
+    color: '#252525',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  approvalText: {
+    color: '#666666',
+    fontSize: 10,
+    lineHeight: 15,
+  },
+  primaryButton: {
+    minHeight: 44,
+    backgroundColor: '#ED1C24',
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 11,
+  },
   primaryButtonText: {
     color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 16,
+    fontSize: 15,
+    fontWeight: '900',
+    letterSpacing: 0.3,
   },
-
   disabled: {
     opacity: 0.6,
   },
-
   switchButton: {
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 4,
-    gap: 2,
+    gap: 4,
+    paddingVertical: 2,
   },
-
   switchPrompt: {
-    color: '#64748B',
-    fontSize: 12,
+    color: '#686868',
+    fontSize: 11,
   },
-
   switchText: {
-    color: '#2878C8',
-    fontWeight: '700',
-    fontSize: 13,
+    color: '#C8102E',
+    fontSize: 12,
+    fontWeight: '900',
   },
-
   bottomNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
     borderTopWidth: 1,
-    borderTopColor: '#E2E8F0',
-    paddingTop: 14,
+    borderTopColor: '#E8E8E8',
+    paddingTop: 9,
+  },
+  securityIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#FFE6E7',
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  securityCheck: {
+    color: '#C8102E',
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  noticeCopy: {
+    flex: 1,
     gap: 3,
   },
-
   bottomNoticeTitle: {
-    color: '#334155',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-
-  bottomNoticeText: {
-    color: '#94A3B8',
+    color: '#333333',
     fontSize: 10,
-    lineHeight: 15,
+    fontWeight: '900',
+  },
+  bottomNoticeText: {
+    color: '#777777',
+    fontSize: 9,
+    lineHeight: 13,
+  },
+  footer: {
+    color: '#FFFFFF',
+    fontSize: 8,
+    fontWeight: '900',
+    letterSpacing: 1.2,
     textAlign: 'center',
-    maxWidth: 340,
+    marginTop: 8,
+    opacity: 0.9,
   },
 });

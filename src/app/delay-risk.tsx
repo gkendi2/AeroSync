@@ -14,11 +14,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-const NAVY = '#163B65';
-const BLUE = '#2878C8';
-const BG = '#F4F6FA';
-const MUTED = '#64748B';
-const BORDER = '#E2E8F0';
+const NAVY = '#252525';
+const BLUE = '#C8102E';
+const BG = '#F4F3F3';
+const MUTED = '#777777';
+const BORDER = '#EAEAEA';
 
 const GREEN = '#15803D';
 const GREEN_BG = '#ECFDF3';
@@ -26,8 +26,8 @@ const GREEN_BG = '#ECFDF3';
 const ORANGE = '#B45309';
 const ORANGE_BG = '#FFF7ED';
 
-const RED = '#B91C1C';
-const RED_BG = '#FEF2F2';
+const RED = '#C8102E';
+const RED_BG = '#FDE9EC';
 
 const STALE_BAGGAGE_MINUTES = 60;
 
@@ -50,18 +50,50 @@ type BaggageRecord = {
   createdAt: Date | null;
 };
 
+type Flight = {
+  id: string;
+  flightNumber: string;
+  origin: string;
+  destination: string;
+  departureDate: string;
+  departureTime: string;
+  status: string;
+  isDemo?: boolean;
+};
+
+type Incident = {
+  id: string;
+  flightId: string;
+  flightNumber: string;
+  reportCategory: string;
+  incidentType: string;
+  location: string;
+  severity: string;
+  description: string;
+  status: string;
+  reportedAt: Date | null;
+};
+
+const UNRESOLVED_INCIDENT_STATUSES = [
+  'Open',
+  'Under Investigation',
+];
+
 export default function DelayRiskScreen({
   onBack,
 }: {
   onBack?: () => void;
 }) {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
-  const [baggageRecords, setBaggageRecords] = useState<BaggageRecord[]>(
-    [],
-  );
+  const [baggageRecords, setBaggageRecords] = useState<BaggageRecord[]>([]);
+  const [flightsData, setFlightsData] = useState<Flight[]>([]);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+
   const [selectedFlight, setSelectedFlight] = useState('');
   const [loadingAssignments, setLoadingAssignments] = useState(true);
   const [loadingBaggage, setLoadingBaggage] = useState(true);
+  const [loadingFlights, setLoadingFlights] = useState(true);
+  const [loadingIncidents, setLoadingIncidents] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -69,6 +101,8 @@ export default function DelayRiskScreen({
       setError('Please sign in to assess operational risk.');
       setLoadingAssignments(false);
       setLoadingBaggage(false);
+      setLoadingFlights(false);
+      setLoadingIncidents(false);
       return;
     }
 
@@ -92,7 +126,6 @@ export default function DelayRiskScreen({
 
         setAssignments(results);
         setLoadingAssignments(false);
-        setError('');
       },
       (err) => {
         console.error('Could not load assignments:', err);
@@ -116,8 +149,7 @@ export default function DelayRiskScreen({
             flightId: data.flightId ?? '',
             status: data.status ?? 'Unknown',
             createdAt:
-              timestamp &&
-              typeof timestamp.toDate === 'function'
+              timestamp && typeof timestamp.toDate === 'function'
                 ? timestamp.toDate()
                 : null,
           };
@@ -135,29 +167,118 @@ export default function DelayRiskScreen({
       },
     );
 
+    const unsubscribeFlights = onSnapshot(
+      collection(db, 'Flights'),
+      (snapshot) => {
+        const results: Flight[] = snapshot.docs.map((item) => {
+          const data = item.data();
+
+          return {
+            id: item.id,
+            flightNumber: data.flightNumber ?? '',
+            origin: data.origin ?? '',
+            destination: data.destination ?? '',
+            departureDate: data.departureDate ?? '',
+            departureTime: data.departureTime ?? '',
+            status: data.status ?? '',
+            isDemo: data.isDemo ?? false,
+          };
+        });
+
+        setFlightsData(results);
+        setLoadingFlights(false);
+      },
+      (err) => {
+        console.error('Could not load flights:', err);
+        setError(
+          'Could not read flight records. Check Firestore permissions.',
+        );
+        setLoadingFlights(false);
+      },
+    );
+
+    const unsubscribeIncidents = onSnapshot(
+      collection(db, 'Incidents'),
+      (snapshot) => {
+        const results: Incident[] = snapshot.docs.map((item) => {
+          const data = item.data();
+          const timestamp = data.reportedAt;
+
+          return {
+            id: item.id,
+            flightId: data.flightId ?? '',
+            flightNumber: data.flightNumber ?? '',
+            reportCategory: data.reportCategory ?? '',
+            incidentType: data.incidentType ?? '',
+            location: data.location ?? '',
+            severity: data.severity ?? 'Low',
+            description: data.description ?? '',
+            status: data.status ?? 'Open',
+            reportedAt:
+              timestamp && typeof timestamp.toDate === 'function'
+                ? timestamp.toDate()
+                : null,
+          };
+        });
+
+        setIncidents(results);
+        setLoadingIncidents(false);
+      },
+      (err) => {
+        console.error('Could not load incidents:', err);
+        setError(
+          'Could not read incident reports. Check Firestore permissions.',
+        );
+        setLoadingIncidents(false);
+      },
+    );
+
     return () => {
       unsubscribeAssignments();
       unsubscribeBaggage();
+      unsubscribeFlights();
+      unsubscribeIncidents();
     };
   }, []);
 
   const flights = useMemo(() => {
-    const identifiers = new Set<string>();
+    const flightMap = new Map<string, Flight>();
 
-    assignments.forEach((item) => {
-      if (item.flightNumber.trim()) {
-        identifiers.add(item.flightNumber.trim());
+    flightsData.forEach((flight) => {
+      if (flight.id && flight.flightNumber.trim()) {
+        flightMap.set(flight.id, flight);
       }
     });
 
-    baggageRecords.forEach((item) => {
-      if (item.flightId.trim()) {
-        identifiers.add(item.flightId.trim());
+    // Include flights found in operational records if they are
+    // not yet present in the Flights collection.
+    assignments.forEach((assignment) => {
+      const number = assignment.flightNumber.trim();
+
+      if (!number) return;
+
+      const exists = Array.from(flightMap.values()).some(
+        (flight) => flight.flightNumber === number,
+      );
+
+      if (!exists) {
+        flightMap.set(`assignment-${number}`, {
+          id: `assignment-${number}`,
+          flightNumber: number,
+          origin: '',
+          destination: '',
+          departureDate: '',
+          departureTime: '',
+          status: '',
+          isDemo: true,
+        });
       }
     });
 
-    return Array.from(identifiers).sort();
-  }, [assignments, baggageRecords]);
+    return Array.from(flightMap.values()).sort((a, b) =>
+      a.flightNumber.localeCompare(b.flightNumber),
+    );
+  }, [flightsData, assignments]);
 
   useEffect(() => {
     if (flights.length === 0) {
@@ -165,17 +286,52 @@ export default function DelayRiskScreen({
       return;
     }
 
-    if (!flights.includes(selectedFlight)) {
-      setSelectedFlight(flights[0]);
+    if (!flights.some((flight) => flight.id === selectedFlight)) {
+      setSelectedFlight(flights[0].id);
     }
   }, [flights, selectedFlight]);
 
+  const selectedFlightData = flights.find(
+    (flight) => flight.id === selectedFlight,
+  );
+
+  const selectedFlightNumber =
+    selectedFlightData?.flightNumber ?? '';
+
   const flightAssignments = assignments.filter(
-    (item) => item.flightNumber === selectedFlight,
+    (item) => item.flightNumber === selectedFlightNumber,
   );
 
   const flightBaggage = baggageRecords.filter(
     (item) => item.flightId === selectedFlight,
+  );
+
+  const flightIncidents = incidents.filter((item) => {
+    // Match by the actual Firestore flight document ID first.
+    if (item.flightId && item.flightId === selectedFlight) {
+      return true;
+    }
+
+    // Fallback for older reports that may only have a flight number.
+    return (
+      !item.flightId &&
+      item.flightNumber === selectedFlightNumber
+    );
+  });
+
+  const unresolvedIncidents = flightIncidents.filter((item) =>
+    UNRESOLVED_INCIDENT_STATUSES.some(
+      (status) =>
+        status.toLowerCase() === item.status.toLowerCase(),
+    ),
+  );
+
+  const highSeverityIncidents = unresolvedIncidents.filter(
+    (item) => {
+      const severity = item.severity.toLowerCase();
+
+      return severity === 'high' || severity === 'critical';
+    },
   );
 
   const now = Date.now();
@@ -233,12 +389,16 @@ export default function DelayRiskScreen({
     );
   }
 
-  const warningCount =
-    Number(overdueAssignments.length > 0) +
-    Number(oldRegisteredBaggage.length > 0);
+  if (unresolvedIncidents.length > 0) {
+    warnings.push(
+      `${unresolvedIncidents.length} unresolved incident report(s) are linked to this flight.`,
+    );
+  }
+
+  const warningCount = warnings.length;
 
   const risk =
-    warningCount >= 2
+    highSeverityIncidents.length > 0 || warningCount >= 2
       ? 'High'
       : warningCount === 1
         ? 'Medium'
@@ -266,7 +426,16 @@ export default function DelayRiskScreen({
         : '#BBF7D0';
 
   const isLoading =
-    loadingAssignments || loadingBaggage;
+    loadingAssignments ||
+    loadingBaggage ||
+    loadingFlights ||
+    loadingIncidents;
+
+  function formatIncidentDate(date: Date | null) {
+    if (!date) return 'Date unavailable';
+
+    return date.toLocaleString();
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -340,7 +509,8 @@ export default function DelayRiskScreen({
             </Text>
 
             <Text style={styles.muted}>
-              Checking crew assignments and baggage records...
+              Checking flights, crew assignments, baggage and
+              incident reports...
             </Text>
           </View>
         ) : (
@@ -371,8 +541,7 @@ export default function DelayRiskScreen({
                 </Text>
 
                 <Text style={styles.sectionSubtitle}>
-                  Choose an identifier from your existing
-                  operational records.
+                  Choose a flight from your operational records.
                 </Text>
               </View>
             </View>
@@ -387,49 +556,54 @@ export default function DelayRiskScreen({
                   </View>
 
                   <Text style={styles.emptyTitle}>
-                    No flight identifiers yet
+                    No flights available
                   </Text>
 
                   <Text style={styles.muted}>
-                    Create a crew assignment or register
-                    baggage for a flight first.
+                    Add a flight or create a crew assignment first.
                   </Text>
                 </View>
               ) : (
                 <View style={styles.flightList}>
                   {flights.map((flight) => {
                     const selected =
-                      selectedFlight === flight;
+                      selectedFlight === flight.id;
 
                     const assignmentCount =
                       assignments.filter(
                         (item) =>
-                          item.flightNumber === flight,
+                          item.flightNumber === flight.flightNumber,
                       ).length;
 
                     const baggageCount =
                       baggageRecords.filter(
-                        (item) => item.flightId === flight,
+                        (item) => item.flightId === flight.id,
+                      ).length;
+
+                    const incidentCount =
+                      incidents.filter(
+                        (item) =>
+                          item.flightId === flight.id ||
+                          (!item.flightId &&
+                            item.flightNumber === flight.flightNumber),
                       ).length;
 
                     return (
                       <Pressable
-                        key={flight}
+                        key={flight.id}
                         onPress={() =>
-                          setSelectedFlight(flight)
+                          setSelectedFlight(flight.id)
                         }
                         style={({ pressed }) => [
                           styles.flightOption,
-                          selected &&
-                            styles.flightSelected,
+                          selected && styles.flightSelected,
                           pressed && styles.pressed,
                         ]}
                       >
                         <View
                           style={[
                             styles.flightIcon,
-                            selected &&
-                              styles.flightIconSelected,
+                            selected && styles.flightIconSelected,
                           ]}
                         >
                           <Text
@@ -447,23 +621,18 @@ export default function DelayRiskScreen({
                           <Text
                             style={[
                               styles.flightOptionText,
-                              selected &&
-                                styles.flightSelectedText,
+                              selected && styles.flightSelectedText,
                             ]}
                           >
-                            {flight}
+                            {flight.flightNumber}
                           </Text>
 
                           <Text style={styles.flightMeta}>
-                            {assignmentCount}{' '}
-                            assignment
-                            {assignmentCount === 1
-                              ? ''
-                              : 's'} · {baggageCount}{' '}
-                            baggage
-                            {baggageCount === 1
-                              ? ''
-                              : ' records'}
+                            {assignmentCount} assignment
+                            {assignmentCount === 1 ? '' : 's'} ·{' '}
+                            {baggageCount} baggage · {incidentCount}{' '}
+                            incident
+                            {incidentCount === 1 ? '' : 's'}
                           </Text>
                         </View>
 
@@ -476,9 +645,7 @@ export default function DelayRiskScreen({
                         >
                           {selected ? (
                             <Text
-                              style={
-                                styles.selectionCheck
-                              }
+                              style={styles.selectionCheck}
                             >
                               ✓
                             </Text>
@@ -505,7 +672,7 @@ export default function DelayRiskScreen({
                     </Text>
 
                     <Text style={styles.sectionSubtitle}>
-                      Current indicators for {selectedFlight}.
+                      Current indicators for {selectedFlightNumber}.
                     </Text>
                   </View>
                 </View>
@@ -526,7 +693,7 @@ export default function DelayRiskScreen({
                       </Text>
 
                       <Text style={styles.riskFlight}>
-                        {selectedFlight}
+                        {selectedFlightNumber}
                       </Text>
                     </View>
 
@@ -563,9 +730,7 @@ export default function DelayRiskScreen({
                     {warningCount === 0
                       ? 'No configured warning conditions were detected in the available records. This does not guarantee an absence of delay risk.'
                       : `${warningCount} warning categor${
-                          warningCount === 1
-                            ? 'y'
-                            : 'ies'
+                          warningCount === 1 ? 'y' : 'ies'
                         } detected. Review the findings below.`}
                   </Text>
 
@@ -587,6 +752,16 @@ export default function DelayRiskScreen({
 
                       <Text style={styles.metricLabel}>
                         Baggage
+                      </Text>
+                    </View>
+
+                    <View style={styles.metricBox}>
+                      <Text style={styles.metricNumber}>
+                        {unresolvedIncidents.length}
+                      </Text>
+
+                      <Text style={styles.metricLabel}>
+                        Open incidents
                       </Text>
                     </View>
 
@@ -635,9 +810,7 @@ export default function DelayRiskScreen({
                       ]}
                     >
                       {warningCount}{' '}
-                      {warningCount === 1
-                        ? 'warning'
-                        : 'warnings'}
+                      {warningCount === 1 ? 'warning' : 'warnings'}
                     </Text>
                   </View>
                 </View>
@@ -667,9 +840,7 @@ export default function DelayRiskScreen({
                             : styles.findingIconTextGood,
                         ]}
                       >
-                        {overdueAssignments.length > 0
-                          ? '!'
-                          : '✓'}
+                        {overdueAssignments.length > 0 ? '!' : '✓'}
                       </Text>
                     </View>
 
@@ -679,8 +850,7 @@ export default function DelayRiskScreen({
                       </Text>
 
                       <Text style={styles.findingSubtitle}>
-                        Assigned work after scheduled shift
-                        end.
+                        Assigned work after scheduled shift end.
                       </Text>
                     </View>
 
@@ -709,28 +879,15 @@ export default function DelayRiskScreen({
                           key={item.id}
                           style={styles.detailRow}
                         >
-                          <View
-                            style={
-                              styles.detailBullet
-                            }
-                          />
+                          <View style={styles.detailBullet} />
 
-                          <View
-                            style={
-                              styles.detailContent
-                            }
-                          >
-                            <Text
-                              style={styles.detailTitle}
-                            >
+                          <View style={styles.detailContent}>
+                            <Text style={styles.detailTitle}>
                               {item.handlerName}
                             </Text>
 
-                            <Text
-                              style={styles.detailText}
-                            >
-                              {item.activity} ·{' '}
-                              {item.shiftTime}
+                            <Text style={styles.detailText}>
+                              {item.activity} · {item.shiftTime}
                             </Text>
                           </View>
                         </View>
@@ -764,9 +921,7 @@ export default function DelayRiskScreen({
                             : styles.findingIconTextGood,
                         ]}
                       >
-                        {oldRegisteredBaggage.length > 0
-                          ? '!'
-                          : '✓'}
+                        {oldRegisteredBaggage.length > 0 ? '!' : '✓'}
                       </Text>
                     </View>
 
@@ -776,8 +931,8 @@ export default function DelayRiskScreen({
                       </Text>
 
                       <Text style={styles.findingSubtitle}>
-                        Records remaining Registered for at
-                        least {STALE_BAGGAGE_MINUTES} minutes.
+                        Records remaining Registered for at least{' '}
+                        {STALE_BAGGAGE_MINUTES} minutes.
                       </Text>
                     </View>
 
@@ -796,8 +951,8 @@ export default function DelayRiskScreen({
 
                   {oldRegisteredBaggage.length === 0 ? (
                     <Text style={styles.goodText}>
-                      No potentially stalled baggage detected
-                      for this flight.
+                      No potentially stalled baggage detected for
+                      this flight.
                     </Text>
                   ) : (
                     <View style={styles.detailList}>
@@ -806,28 +961,109 @@ export default function DelayRiskScreen({
                           key={item.id}
                           style={styles.detailRow}
                         >
-                          <View
-                            style={
-                              styles.detailBullet
-                            }
-                          />
+                          <View style={styles.detailBullet} />
 
-                          <View
-                            style={
-                              styles.detailContent
-                            }
-                          >
-                            <Text
-                              style={styles.detailTitle}
-                            >
+                          <View style={styles.detailContent}>
+                            <Text style={styles.detailTitle}>
                               {item.baggageId}
                             </Text>
 
-                            <Text
-                              style={styles.detailText}
-                            >
-                              Current status:{' '}
-                              {item.status}
+                            <Text style={styles.detailText}>
+                              Current status: {item.status}
+                            </Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+
+                {/* Incident warning */}
+                <View
+                  style={[
+                    styles.findingCard,
+                    unresolvedIncidents.length > 0 &&
+                      styles.findingCardWarning,
+                  ]}
+                >
+                  <View style={styles.findingTop}>
+                    <View
+                      style={[
+                        styles.findingIcon,
+                        unresolvedIncidents.length > 0
+                          ? styles.findingIconWarning
+                          : styles.findingIconGood,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.findingIconText,
+                          unresolvedIncidents.length > 0
+                            ? styles.findingIconTextWarning
+                            : styles.findingIconTextGood,
+                        ]}
+                      >
+                        {unresolvedIncidents.length > 0 ? '!' : '✓'}
+                      </Text>
+                    </View>
+
+                    <View style={styles.findingHeading}>
+                      <Text style={styles.findingTitle}>
+                        Incident reports
+                      </Text>
+
+                      <Text style={styles.findingSubtitle}>
+                        Open and under-investigation reports linked
+                        to this flight.
+                      </Text>
+                    </View>
+
+                    <Text
+                      style={[
+                        styles.findingNumber,
+                        unresolvedIncidents.length > 0 &&
+                          styles.findingNumberWarning,
+                      ]}
+                    >
+                      {unresolvedIncidents.length}
+                    </Text>
+                  </View>
+
+                  <View style={styles.findingDivider} />
+
+                  {unresolvedIncidents.length === 0 ? (
+                    <Text style={styles.goodText}>
+                      No unresolved incident reports detected for
+                      this flight.
+                    </Text>
+                  ) : (
+                    <View style={styles.detailList}>
+                      {unresolvedIncidents.map((item) => (
+                        <View
+                          key={item.id}
+                          style={styles.detailRow}
+                        >
+                          <View style={styles.detailBullet} />
+
+                          <View style={styles.detailContent}>
+                            <Text style={styles.detailTitle}>
+                              {item.incidentType ||
+                                item.reportCategory ||
+                                'Incident report'}
+                              {' · '}
+                              {item.severity}
+                            </Text>
+
+                            <Text style={styles.detailText}>
+                              {item.description}
+                            </Text>
+
+                            <Text style={styles.detailText}>
+                              {item.location
+                                ? `${item.location} · `
+                                : ''}
+                              {item.status} ·{' '}
+                              {formatIncidentDate(item.reportedAt)}
                             </Text>
                           </View>
                         </View>
@@ -860,8 +1096,7 @@ export default function DelayRiskScreen({
                   {flightAssignments.length === 0 ? (
                     <View style={styles.inlineEmpty}>
                       <Text style={styles.muted}>
-                        No assignments match this exact flight
-                        identifier.
+                        No assignments match this flight number.
                       </Text>
                     </View>
                   ) : (
@@ -872,44 +1107,29 @@ export default function DelayRiskScreen({
                           style={styles.recordRow}
                         >
                           <View style={styles.recordAvatar}>
-                            <Text
-                              style={
-                                styles.recordAvatarText
-                              }
-                            >
+                            <Text style={styles.recordAvatarText}>
                               {item.handlerName
                                 .charAt(0)
                                 .toUpperCase()}
                             </Text>
                           </View>
 
-                          <View
-                            style={styles.recordContent}
-                          >
-                            <Text
-                              style={styles.recordTitle}
-                            >
+                          <View style={styles.recordContent}>
+                            <Text style={styles.recordTitle}>
                               {item.handlerName}
                             </Text>
 
-                            <Text
-                              style={styles.recordMeta}
-                            >
+                            <Text style={styles.recordMeta}>
                               {item.activity}
                             </Text>
 
-                            <Text
-                              style={styles.recordMeta}
-                            >
-                              {item.shiftDate} ·{' '}
-                              {item.shiftTime}
+                            <Text style={styles.recordMeta}>
+                              {item.shiftDate} · {item.shiftTime}
                             </Text>
                           </View>
 
                           <View style={styles.statusBadge}>
-                            <Text
-                              style={styles.statusBadgeText}
-                            >
+                            <Text style={styles.statusBadgeText}>
                               {item.status}
                             </Text>
                           </View>
@@ -943,8 +1163,7 @@ export default function DelayRiskScreen({
                   {flightBaggage.length === 0 ? (
                     <View style={styles.inlineEmpty}>
                       <Text style={styles.muted}>
-                        No baggage records match this exact
-                        flight identifier.
+                        No baggage records match this flight.
                       </Text>
                     </View>
                   ) : (
@@ -955,38 +1174,90 @@ export default function DelayRiskScreen({
                           style={styles.baggageRow}
                         >
                           <View style={styles.baggageIcon}>
-                            <Text
-                              style={styles.baggageIconText}
-                            >
+                            <Text style={styles.baggageIconText}>
                               ▣
                             </Text>
                           </View>
 
-                          <View
-                            style={styles.recordContent}
-                          >
-                            <Text
-                              style={styles.recordTitle}
-                            >
+                          <View style={styles.recordContent}>
+                            <Text style={styles.recordTitle}>
                               {item.baggageId}
                             </Text>
 
-                            <Text
-                              style={styles.recordMeta}
-                            >
+                            <Text style={styles.recordMeta}>
                               Current status
                             </Text>
                           </View>
 
-                          <View
-                            style={styles.baggageStatus}
-                          >
-                            <Text
-                              style={
-                                styles.baggageStatusText
-                              }
-                            >
+                          <View style={styles.baggageStatus}>
+                            <Text style={styles.baggageStatusText}>
                               {item.status}
+                            </Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+
+                {/* Incident overview */}
+                <View style={styles.detailCard}>
+                  <View style={styles.cardHeader}>
+                    <View>
+                      <Text style={styles.cardTitle}>
+                        Incident overview
+                      </Text>
+
+                      <Text style={styles.cardSubtitle}>
+                        All incident reports associated with this
+                        flight, including resolved reports.
+                      </Text>
+                    </View>
+
+                    <View style={styles.cardCount}>
+                      <Text style={styles.cardCountText}>
+                        {flightIncidents.length}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {flightIncidents.length === 0 ? (
+                    <View style={styles.inlineEmpty}>
+                      <Text style={styles.muted}>
+                        No incident reports are linked to this
+                        flight.
+                      </Text>
+                    </View>
+                  ) : (
+                    <View style={styles.recordList}>
+                      {flightIncidents.map((item) => (
+                        <View
+                          key={item.id}
+                          style={styles.incidentOverviewRow}
+                        >
+                          <View style={styles.incidentOverviewIcon}>
+                            <Text style={styles.incidentOverviewIconText}>
+                              !
+                            </Text>
+                          </View>
+
+                          <View style={styles.recordContent}>
+                            <Text style={styles.recordTitle}>
+                              {item.incidentType ||
+                                item.reportCategory ||
+                                'Incident'}
+                            </Text>
+
+                            <Text style={styles.recordMeta}>
+                              Severity: {item.severity}
+                            </Text>
+
+                            <Text style={styles.recordMeta}>
+                              Status: {item.status}
+                            </Text>
+
+                            <Text style={styles.recordMeta}>
+                              {formatIncidentDate(item.reportedAt)}
                             </Text>
                           </View>
                         </View>
@@ -1027,8 +1298,7 @@ export default function DelayRiskScreen({
                       <Text style={styles.ruleStrong}>
                         Low
                       </Text>{' '}
-                      — no configured warning categories
-                      detected.
+                      — no configured warning categories detected.
                     </Text>
                   </View>
 
@@ -1060,8 +1330,9 @@ export default function DelayRiskScreen({
                       <Text style={styles.ruleStrong}>
                         High
                       </Text>{' '}
-                      — both overdue assignments and old
-                      Registered baggage are detected.
+                      — two or more warning categories are
+                      detected, or at least one unresolved
+                      High/Critical incident is reported.
                     </Text>
                   </View>
 
@@ -1070,6 +1341,8 @@ export default function DelayRiskScreen({
                   <Text style={styles.footnote}>
                     This is a provisional rule-based indicator,
                     not a trained Decision Tree prediction.
+                    Incident reports are counted only when their
+                    status is Open or Under Investigation.
                   </Text>
                 </View>
               </>
@@ -1269,7 +1542,7 @@ const styles = StyleSheet.create({
 
   flightSelected: {
     borderColor: BLUE,
-    backgroundColor: '#EFF6FF',
+    backgroundColor: '#FDEFF1',
   },
 
   pressed: {
@@ -1280,7 +1553,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: '#F1F5F9',
+    backgroundColor: '#F5F5F5',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1324,7 +1597,7 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 12,
     borderWidth: 1.5,
-    borderColor: '#CBD5E1',
+    borderColor: '#E5C7CC',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1402,10 +1675,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     marginTop: 16,
     gap: 8,
+    flexWrap: 'wrap',
   },
 
   metricBox: {
     flex: 1,
+    minWidth: 65,
     backgroundColor: 'rgba(255,255,255,0.65)',
     borderRadius: 12,
     padding: 10,
@@ -1434,7 +1709,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 9,
     paddingVertical: 6,
     borderRadius: 12,
-    backgroundColor: '#F1F5F9',
+    backgroundColor: '#F5F5F5',
   },
 
   warningCountBadgeActive: {
@@ -1462,7 +1737,7 @@ const styles = StyleSheet.create({
 
   findingCardWarning: {
     borderColor: '#FED7AA',
-    backgroundColor: '#FFFCF8',
+    backgroundColor: '#FFFAFA',
   },
 
   findingTop: {
@@ -1609,7 +1884,7 @@ const styles = StyleSheet.create({
     height: 29,
     paddingHorizontal: 8,
     borderRadius: 15,
-    backgroundColor: '#EAF2FC',
+    backgroundColor: '#FDE9EC',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1636,7 +1911,7 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: '#EAF2FC',
+    backgroundColor: '#FDE9EC',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1667,7 +1942,7 @@ const styles = StyleSheet.create({
   },
 
   statusBadge: {
-    backgroundColor: '#EFF6FF',
+    backgroundColor: '#FDEFF1',
     borderRadius: 10,
     paddingHorizontal: 7,
     paddingVertical: 5,
@@ -1691,7 +1966,7 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 11,
-    backgroundColor: '#EAF2FC',
+    backgroundColor: '#FDE9EC',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1712,6 +1987,29 @@ const styles = StyleSheet.create({
     color: NAVY,
     fontSize: 8,
     fontWeight: '800',
+  },
+
+  incidentOverviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: BORDER,
+    paddingVertical: 10,
+  },
+
+  incidentOverviewIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 11,
+    backgroundColor: '#FFEDD5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  incidentOverviewIconText: {
+    color: ORANGE,
+    fontSize: 15,
+    fontWeight: '900',
   },
 
   inlineEmpty: {
@@ -1737,7 +2035,7 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 11,
-    backgroundColor: '#EAF2FC',
+    backgroundColor: '#FDE9EC',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1825,7 +2123,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 15,
-    backgroundColor: '#EAF2FC',
+    backgroundColor: '#FDE9EC',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 9,

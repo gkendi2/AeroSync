@@ -1,13 +1,12 @@
-
 import { auth, db } from '@/lib/firebase';
 import {
   collection,
   doc,
   onSnapshot,
   query,
+  runTransaction,
   serverTimestamp,
   Timestamp,
-  updateDoc,
   where,
 } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
@@ -28,51 +27,26 @@ type Assignment = {
   shiftTime: string;
   activity: string;
   status: string;
-  handlerName: string;
-  checkInAt?: Timestamp | null;
-  checkOutAt?: Timestamp | null;
-  attendanceStatus?: string;
 };
 
-const NAVY = '#163B65';
-const BLUE = '#2878C8';
-const BG = '#F4F6FA';
-const MUTED = '#64748B';
-const GREEN = '#15803D';
-const BORDER = '#E2E8F0';
+type Attendance = {
+  handlerUid: string;
+  handlerName: string;
+  date: string;
+  status: 'Checked In' | 'Checked Out';
+  checkInAt?: Timestamp | null;
+  checkOutAt?: Timestamp | null;
+};
 
-function formatTimestamp(value?: Timestamp | null) {
-  if (!value || typeof value.toDate !== 'function') {
-    return 'Not recorded';
-  }
-
-  return value.toDate().toLocaleString([], {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  });
-}
-
-function formatDuration(
-  checkInAt?: Timestamp | null,
-  checkOutAt?: Timestamp | null
-) {
-  if (!checkInAt || !checkOutAt) {
-    return 'Unavailable';
-  }
-
-  const milliseconds =
-    checkOutAt.toMillis() - checkInAt.toMillis();
-
-  if (milliseconds < 0) {
-    return 'Unavailable';
-  }
-
-  const totalMinutes = Math.floor(milliseconds / 60000);
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-
-  return `${hours}h ${minutes}m`;
-}
+const RED = '#C8102E';
+const DARK_RED = '#A20D25';
+const CHARCOAL = '#252525';
+const BACKGROUND = '#F4F3F3';
+const WHITE = '#FFFFFF';
+const MUTED = '#777777';
+const BORDER = '#E7E7E9';
+const GREEN = '#16805C';
+const PALE_RED = '#FCEBED';
 
 function getLocalDateKey(date: Date) {
   const year = date.getFullYear();
@@ -82,89 +56,115 @@ function getLocalDateKey(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
-function isTodayShift(shiftDate: string) {
+function isTodayShift(shiftDate: string, today: string) {
   const value = shiftDate.trim();
-  const today = getLocalDateKey(new Date());
 
-  // ISO-style dates: YYYY-MM-DD
   const isoMatch = value.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
 
   if (isoMatch) {
-    const year = isoMatch[1];
-    const month = isoMatch[2].padStart(2, '0');
-    const day = isoMatch[3].padStart(2, '0');
-
-    return `${year}-${month}-${day}` === today;
+    return (
+      `${isoMatch[1]}-${isoMatch[2].padStart(2, '0')}-${isoMatch[3].padStart(2, '0')}` ===
+      today
+    );
   }
 
-  // Kenyan-style dates: DD/MM/YYYY or DD-MM-YYYY
   const localMatch = value.match(
     /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/
   );
 
   if (localMatch) {
-    const day = localMatch[1].padStart(2, '0');
-    const month = localMatch[2].padStart(2, '0');
-    const year = localMatch[3];
-
-    return `${year}-${month}-${day}` === today;
+    return (
+      `${localMatch[3]}-${localMatch[2].padStart(2, '0')}-${localMatch[1].padStart(2, '0')}` ===
+      today
+    );
   }
 
-  // Fallback for other date formats JavaScript can parse.
   const parsed = new Date(value);
 
-  if (Number.isNaN(parsed.getTime())) {
-    return false;
-  }
-
-  return getLocalDateKey(parsed) === today;
+  return (
+    !Number.isNaN(parsed.getTime()) &&
+    getLocalDateKey(parsed) === today
+  );
 }
 
-function getStatusColors(status: string) {
-  switch (status) {
-    case 'Completed':
-      return {
-        backgroundColor: '#DCFCE7',
-        color: '#166534',
-      };
-
-    case 'In Progress':
-      return {
-        backgroundColor: '#FEF3C7',
-        color: '#92400E',
-      };
-
-    default:
-      return {
-        backgroundColor: '#EAF2FC',
-        color: BLUE,
-      };
+function formatTime(value?: Timestamp | null) {
+  if (!value || typeof value.toDate !== 'function') {
+    return 'Not recorded';
   }
+
+  return value.toDate().toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function formatDuration(
+  checkInAt?: Timestamp | null,
+  checkOutAt?: Timestamp | null
+) {
+  if (!checkInAt || !checkOutAt) {
+    return 'Still on duty';
+  }
+
+  const milliseconds =
+    checkOutAt.toMillis() - checkInAt.toMillis();
+
+  if (milliseconds < 0) return 'Unavailable';
+
+  const minutes = Math.floor(milliseconds / 60000);
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+
+  return `${hours}h ${remainingMinutes}m`;
 }
 
 export default function HandlerDashboard() {
+  const user = auth.currentUser;
+
+  const today = getLocalDateKey(new Date());
+
+  const handlerName =
+    user?.displayName?.trim() ||
+    user?.email?.split('@')[0] ||
+    'Handler';
+
   const [assignments, setAssignments] = useState<Assignment[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [updatingId, setUpdatingId] = useState<string | null>(null);
-  const [updateError, setUpdateError] = useState('');
+  const [attendance, setAttendance] = useState<Attendance | null>(null);
+
+  const [loadingAssignments, setLoadingAssignments] = useState(true);
+  const [loadingAttendance, setLoadingAttendance] = useState(true);
+
+  const [attendanceError, setAttendanceError] = useState('');
+  const [assignmentError, setAssignmentError] = useState('');
+  const [updatingAttendance, setUpdatingAttendance] = useState(false);
+
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  const attendanceId = user ? `${user.uid}_${today}` : '';
 
   useEffect(() => {
-    const user = auth.currentUser;
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 30000);
 
+    return () => clearInterval(timer);
+  }, []);
+
+  // Load the handler's assignments independently of attendance.
+  useEffect(() => {
     if (!user) {
-      setError('Please sign in to view your assignments.');
-      setLoading(false);
+      setAssignmentError('Please sign in to view your assignments.');
+      setLoadingAssignments(false);
       return;
     }
 
-    const myAssignmentsQuery = query(
+    const assignmentsQuery = query(
       collection(db, 'CrewAssignments'),
       where('handlerUid', '==', user.uid)
     );
 
     const unsubscribe = onSnapshot(
-      myAssignmentsQuery,
+      assignmentsQuery,
       (snapshot) => {
         const results: Assignment[] = snapshot.docs.map((item) => {
           const data = item.data();
@@ -176,10 +176,6 @@ export default function HandlerDashboard() {
             shiftTime: data.shiftTime ?? 'Time not specified',
             activity: data.activity ?? 'Activity not specified',
             status: data.status ?? 'Assigned',
-            handlerName: data.handlerName ?? 'Handler',
-            checkInAt: data.checkInAt ?? null,
-            checkOutAt: data.checkOutAt ?? null,
-            attendanceStatus: data.attendanceStatus ?? 'Not Checked In',
           };
         });
 
@@ -190,342 +186,172 @@ export default function HandlerDashboard() {
         );
 
         setAssignments(results);
-        setError('');
-        setLoading(false);
+        setAssignmentError('');
+        setLoadingAssignments(false);
       },
-      (err) => {
-        console.error('Could not load handler assignments:', err);
-        setError(
-          'Unable to load your assignments. Check your connection and Firestore permissions.'
-        );
-        setLoading(false);
+      (error) => {
+        console.error('Could not load assignments:', error);
+        setAssignmentError('Unable to load your assignments.');
+        setLoadingAssignments(false);
       }
     );
 
     return unsubscribe;
   }, []);
 
-  async function updateTaskStatus(
-    assignment: Assignment,
-    newStatus: 'In Progress' | 'Completed'
-  ) {
-    const user = auth.currentUser;
-
-    if (!user) {
-      setUpdateError('Please sign in again before updating a task.');
+  // Attendance has its own document and does not depend on assignments.
+  useEffect(() => {
+    if (!user || !attendanceId) {
+      setLoadingAttendance(false);
       return;
     }
 
-    if (updatingId) return;
+    const attendanceRef = doc(db, 'Attendance', attendanceId);
 
-    setUpdatingId(assignment.id);
-    setUpdateError('');
+    const unsubscribe = onSnapshot(
+      attendanceRef,
+      (snapshot) => {
+        if (!snapshot.exists()) {
+          setAttendance(null);
+        } else {
+          const data = snapshot.data();
 
-    try {
-      await updateDoc(doc(db, 'CrewAssignments', assignment.id), {
-        status: newStatus,
-      });
-    } catch (err) {
-      console.error('Could not update task status:', err);
-      setUpdateError(
-        'Could not update this task. Please check your connection and Firestore Rules.'
-      );
-    } finally {
-      setUpdatingId(null);
-    }
-  }
+          setAttendance({
+            handlerUid: data.handlerUid,
+            handlerName: data.handlerName ?? handlerName,
+            date: data.date ?? today,
+            status: data.status ?? 'Checked In',
+            checkInAt: data.checkInAt ?? null,
+            checkOutAt: data.checkOutAt ?? null,
+          });
+        }
 
-  async function updateAttendance(
-    assignment: Assignment,
-    action: 'checkIn' | 'checkOut'
-  ) {
-    const user = auth.currentUser;
-
-    if (!user) {
-      setUpdateError('Please sign in again before updating attendance.');
-      return;
-    }
-
-    if (updatingId) return;
-
-    if (
-      action === 'checkIn' &&
-      assignment.attendanceStatus !== 'Not Checked In'
-    ) {
-      setUpdateError('This shift has already been checked in.');
-      return;
-    }
-
-    if (
-      action === 'checkOut' &&
-      assignment.attendanceStatus !== 'Checked In'
-    ) {
-      setUpdateError('Check in before checking out.');
-      return;
-    }
-
-    setUpdatingId(assignment.id);
-    setUpdateError('');
-
-    try {
-      const attendanceUpdate =
-        action === 'checkIn'
-          ? {
-              checkInAt: serverTimestamp(),
-              attendanceStatus: 'Checked In',
-            }
-          : {
-              checkOutAt: serverTimestamp(),
-              attendanceStatus: 'Checked Out',
-            };
-
-      await updateDoc(
-        doc(db, 'CrewAssignments', assignment.id),
-        attendanceUpdate
-      );
-    } catch (err) {
-      console.error('Could not update attendance:', err);
-      setUpdateError(
-        'Attendance could not be saved. Check your connection and Firestore Rules.'
-      );
-    } finally {
-      setUpdatingId(null);
-    }
-  }
-
-  function renderAssignmentCard(
-    assignment: Assignment,
-    featured = false
-  ) {
-    const isUpdating = updatingId === assignment.id;
-    const attendanceStatus =
-      assignment.attendanceStatus ?? 'Not Checked In';
-    const statusColors = getStatusColors(assignment.status);
-
-    return (
-      <View
-        key={assignment.id}
-        style={[
-          styles.assignmentCard,
-          featured && styles.featuredAssignmentCard,
-        ]}
-      >
-        <View style={styles.cardHeader}>
-          <View style={styles.flightInfo}>
-            <Text style={styles.flightLabel}>FLIGHT</Text>
-            <Text style={styles.flightNumber}>
-              {assignment.flightNumber}
-            </Text>
-          </View>
-
-          <View
-            style={[
-              styles.statusBadge,
-              { backgroundColor: statusColors.backgroundColor },
-            ]}
-          >
-            <Text
-              style={[
-                styles.statusText,
-                { color: statusColors.color },
-              ]}
-            >
-              {assignment.status}
-            </Text>
-          </View>
-        </View>
-
-        <Text style={styles.activity}>{assignment.activity}</Text>
-
-        <View style={styles.detailsContainer}>
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Shift date</Text>
-            <Text style={styles.detailValue}>
-              {assignment.shiftDate}
-            </Text>
-          </View>
-
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Shift time</Text>
-            <Text style={styles.detailValue}>
-              {assignment.shiftTime}
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.attendanceCard}>
-          <View style={styles.attendanceHeader}>
-            <Text style={styles.attendanceHeading}>Shift attendance</Text>
-
-            <View
-              style={[
-                styles.attendanceDot,
-                attendanceStatus === 'Checked In' &&
-                  styles.checkedInDot,
-                attendanceStatus === 'Checked Out' &&
-                  styles.checkedOutDot,
-              ]}
-            />
-          </View>
-
-          <Text
-            style={[
-              styles.attendanceStatus,
-              attendanceStatus === 'Checked In' &&
-                styles.checkedInText,
-              attendanceStatus === 'Checked Out' &&
-                styles.checkedOutText,
-            ]}
-          >
-            {attendanceStatus}
-          </Text>
-
-          <Text style={styles.attendanceDetail}>
-            Check-in: {formatTimestamp(assignment.checkInAt)}
-          </Text>
-
-          {(attendanceStatus === 'Checked In' ||
-            attendanceStatus === 'Checked Out') && (
-            <Text style={styles.attendanceDetail}>
-              Check-out: {formatTimestamp(assignment.checkOutAt)}
-            </Text>
-          )}
-
-          {attendanceStatus === 'Checked Out' && (
-            <View style={styles.durationRow}>
-              <Text style={styles.durationLabel}>Total shift duration</Text>
-              <Text style={styles.durationValue}>
-                {formatDuration(
-                  assignment.checkInAt,
-                  assignment.checkOutAt
-                )}
-              </Text>
-            </View>
-          )}
-
-          {attendanceStatus === 'Not Checked In' && (
-            <Pressable
-              accessibilityRole="button"
-              disabled={!!updatingId}
-              onPress={() => updateAttendance(assignment, 'checkIn')}
-              style={({ pressed }) => [
-                styles.primaryButton,
-                pressed && styles.buttonPressed,
-                !!updatingId && styles.buttonDisabled,
-              ]}
-            >
-              {isUpdating ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.buttonText}>Check in</Text>
-              )}
-            </Pressable>
-          )}
-
-          {attendanceStatus === 'Checked In' && (
-            <Pressable
-              accessibilityRole="button"
-              disabled={!!updatingId}
-              onPress={() => updateAttendance(assignment, 'checkOut')}
-              style={({ pressed }) => [
-                styles.successButton,
-                pressed && styles.buttonPressed,
-                !!updatingId && styles.buttonDisabled,
-              ]}
-            >
-              {isUpdating ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.buttonText}>Check out</Text>
-              )}
-            </Pressable>
-          )}
-
-          {attendanceStatus === 'Checked Out' && (
-            <View style={styles.completedBanner}>
-              <Text style={styles.completedText}>
-                ✓ Shift checked out
-              </Text>
-            </View>
-          )}
-        </View>
-
-        <View style={styles.taskSection}>
-          <Text style={styles.taskHeading}>Task progress</Text>
-
-          {assignment.status === 'Assigned' && (
-            <Pressable
-              accessibilityRole="button"
-              disabled={!!updatingId}
-              onPress={() =>
-                updateTaskStatus(assignment, 'In Progress')
-              }
-              style={({ pressed }) => [
-                styles.primaryButton,
-                pressed && styles.buttonPressed,
-                !!updatingId && styles.buttonDisabled,
-              ]}
-            >
-              {isUpdating ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.buttonText}>Start task</Text>
-              )}
-            </Pressable>
-          )}
-
-          {assignment.status === 'In Progress' && (
-            <Pressable
-              accessibilityRole="button"
-              disabled={!!updatingId}
-              onPress={() =>
-                updateTaskStatus(assignment, 'Completed')
-              }
-              style={({ pressed }) => [
-                styles.successButton,
-                pressed && styles.buttonPressed,
-                !!updatingId && styles.buttonDisabled,
-              ]}
-            >
-              {isUpdating ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.buttonText}>Mark as completed</Text>
-              )}
-            </Pressable>
-          )}
-
-          {assignment.status === 'Completed' && (
-            <View style={styles.completedBanner}>
-              <Text style={styles.completedText}>
-                ✓ Task completed
-              </Text>
-            </View>
-          )}
-        </View>
-      </View>
+        setAttendanceError('');
+        setLoadingAttendance(false);
+      },
+      (error) => {
+        console.error('Could not load attendance:', error);
+        setAttendanceError(
+          'Unable to load attendance. Check your connection and Firestore permissions.'
+        );
+        setLoadingAttendance(false);
+      }
     );
+
+    return unsubscribe;
+  }, [attendanceId]);
+
+  async function recordAttendance(action: 'checkIn' | 'checkOut') {
+    if (!user) {
+      setAttendanceError('Please sign in again.');
+      return;
+    }
+
+    if (updatingAttendance) return;
+
+    setUpdatingAttendance(true);
+    setAttendanceError('');
+
+    const attendanceRef = doc(db, 'Attendance', attendanceId);
+
+    try {
+      await runTransaction(db, async (transaction) => {
+        const existing = await transaction.get(attendanceRef);
+
+        if (action === 'checkIn') {
+          if (existing.exists()) {
+            throw new Error(
+              'Attendance has already been recorded for today.'
+            );
+          }
+
+          transaction.set(attendanceRef, {
+            handlerUid: user.uid,
+            handlerName,
+            date: today,
+            status: 'Checked In',
+            checkInAt: serverTimestamp(),
+            checkOutAt: null,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+
+          return;
+        }
+
+        if (!existing.exists()) {
+          throw new Error('You must check in before checking out.');
+        }
+
+        const existingData = existing.data();
+
+        if (existingData.status !== 'Checked In') {
+          throw new Error(
+            'You have already checked out for today.'
+          );
+        }
+
+        transaction.update(attendanceRef, {
+          status: 'Checked Out',
+          checkOutAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      });
+    } catch (error) {
+      console.error('Attendance update failed:', error);
+
+      const message =
+        error instanceof Error ? error.message : '';
+
+      setAttendanceError(
+        message ||
+          'Attendance could not be saved. Check your connection and Firestore Rules.'
+      );
+    } finally {
+      setUpdatingAttendance(false);
+    }
   }
 
   const todaysAssignments = assignments.filter((assignment) =>
-    isTodayShift(assignment.shiftDate)
+    isTodayShift(assignment.shiftDate, today)
   );
 
-  const todaysShift = todaysAssignments[0];
-
-  const otherAssignments = todaysShift
-    ? assignments.filter(
-        (assignment) => assignment.id !== todaysShift.id
-      )
-    : assignments;
-
-  const completedCount = assignments.filter(
+  const completedCount = todaysAssignments.filter(
     (assignment) => assignment.status === 'Completed'
   ).length;
 
-  const inProgressCount = assignments.filter(
+  const inProgressCount = todaysAssignments.filter(
     (assignment) => assignment.status === 'In Progress'
   ).length;
+
+  const pendingCount = todaysAssignments.filter(
+    (assignment) =>
+      assignment.status !== 'Completed' &&
+      assignment.status !== 'In Progress'
+  ).length;
+
+  const nextAssignment = todaysAssignments.find(
+    (assignment) =>
+      assignment.status !== 'Completed' &&
+      assignment.status !== 'Cancelled'
+  );
+
+  const isCheckedIn = attendance?.status === 'Checked In';
+  const isCheckedOut = attendance?.status === 'Checked Out';
+
+  const greeting =
+    currentTime.getHours() < 12
+      ? 'Good morning'
+      : currentTime.getHours() < 17
+        ? 'Good afternoon'
+        : 'Good evening';
+
+  const formattedDate = currentTime.toLocaleDateString([], {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -533,167 +359,328 @@ export default function HandlerDashboard() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.topHeader}>
+        {/* Brand header */}
+        <View style={styles.header}>
           <View style={styles.brandMark}>
             <Text style={styles.brandMarkText}>A</Text>
           </View>
 
-          <View style={styles.brandTextContainer}>
-            <Text style={styles.eyebrow}>AEROSYNC</Text>
-            <Text style={styles.workspaceLabel}>HANDLER WORKSPACE</Text>
+          <View style={styles.brandInfo}>
+            <Text style={styles.brandName}>AeroSync</Text>
+            <Text style={styles.brandSubtitle}>
+              GROUND OPERATIONS
+            </Text>
           </View>
 
           <View style={styles.roleBadge}>
-            <Text style={styles.roleBadgeText}>CREW</Text>
+            <Text style={styles.roleBadgeText}>HANDLER</Text>
           </View>
         </View>
 
+        {/* Greeting */}
         <View style={styles.greetingSection}>
-          <Text style={styles.heading}>My operations</Text>
-          <Text style={styles.subtitle}>
-            Your shifts, assignments and attendance in one place.
+          <Text style={styles.greeting}>{greeting},</Text>
+          <Text style={styles.handlerName}>{handlerName}.</Text>
+          <Text style={styles.dateText}>{formattedDate}</Text>
+        </View>
+
+        {/* Attendance */}
+        <View style={styles.attendanceCard}>
+          <View style={styles.attendanceTop}>
+            <View>
+              <Text style={styles.cardEyebrow}>DAILY ATTENDANCE</Text>
+              <Text style={styles.attendanceTitle}>My Shift</Text>
+            </View>
+
+            <View
+              style={[
+                styles.statusBadge,
+                isCheckedIn && styles.statusBadgeActive,
+                isCheckedOut && styles.statusBadgeComplete,
+              ]}
+            >
+              <View
+                style={[
+                  styles.statusDot,
+                  isCheckedIn && styles.activeDot,
+                  isCheckedOut && styles.completeDot,
+                ]}
+              />
+              <Text
+                style={[
+                  styles.statusBadgeText,
+                  isCheckedIn && styles.activeStatusText,
+                  isCheckedOut && styles.completeStatusText,
+                ]}
+              >
+                {loadingAttendance
+                  ? 'LOADING'
+                  : isCheckedIn
+                    ? 'ON DUTY'
+                    : isCheckedOut
+                      ? 'COMPLETED'
+                      : 'NOT CHECKED IN'}
+              </Text>
+            </View>
+          </View>
+
+          <Text style={styles.attendanceDescription}>
+            Record your attendance at the beginning and end of your
+            working shift.
+          </Text>
+
+          {loadingAttendance ? (
+            <View style={styles.loadingButton}>
+              <ActivityIndicator color={RED} />
+              <Text style={styles.loadingButtonText}>
+                Loading attendance...
+              </Text>
+            </View>
+          ) : (
+            <>
+              <View style={styles.timeGrid}>
+                <View style={styles.timeBlock}>
+                  <Text style={styles.timeLabel}>CHECK IN</Text>
+                  <Text style={styles.timeValue}>
+                    {formatTime(attendance?.checkInAt)}
+                  </Text>
+                </View>
+
+                <View style={styles.timeDivider} />
+
+                <View style={styles.timeBlock}>
+                  <Text style={styles.timeLabel}>CHECK OUT</Text>
+                  <Text style={styles.timeValue}>
+                    {formatTime(attendance?.checkOutAt)}
+                  </Text>
+                </View>
+              </View>
+
+              {!attendance && (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.primaryButton,
+                    pressed && styles.pressed,
+                    updatingAttendance && styles.disabledButton,
+                  ]}
+                  disabled={updatingAttendance}
+                  onPress={() => recordAttendance('checkIn')}
+                >
+                  {updatingAttendance ? (
+                    <ActivityIndicator color={WHITE} />
+                  ) : (
+                    <Text style={styles.buttonText}>
+                      CHECK IN FOR TODAY
+                    </Text>
+                  )}
+                </Pressable>
+              )}
+
+              {isCheckedIn && (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.checkoutButton,
+                    pressed && styles.pressed,
+                    updatingAttendance && styles.disabledButton,
+                  ]}
+                  disabled={updatingAttendance}
+                  onPress={() => recordAttendance('checkOut')}
+                >
+                  {updatingAttendance ? (
+                    <ActivityIndicator color={WHITE} />
+                  ) : (
+                    <Text style={styles.buttonText}>
+                      CHECK OUT
+                    </Text>
+                  )}
+                </Pressable>
+              )}
+
+              {isCheckedOut && (
+                <View style={styles.completedBanner}>
+                  <Text style={styles.completedBannerText}>
+                    Your attendance for today is complete.
+                  </Text>
+                </View>
+              )}
+
+              {isCheckedOut && (
+                <View style={styles.durationContainer}>
+                  <Text style={styles.durationLabel}>
+                    Total recorded shift duration
+                  </Text>
+                  <Text style={styles.durationValue}>
+                    {formatDuration(
+                      attendance?.checkInAt,
+                      attendance?.checkOutAt
+                    )}
+                  </Text>
+                </View>
+              )}
+            </>
+          )}
+
+          {!!attendanceError && (
+            <Text style={styles.errorText}>{attendanceError}</Text>
+          )}
+
+          <Text style={styles.attendanceNote}>
+            Attendance is recorded separately from your assigned tasks.
           </Text>
         </View>
 
-        <View style={styles.overviewCard}>
-          <View style={styles.overviewTop}>
-            <View style={styles.overviewText}>
-              <Text style={styles.overviewLabel}>MY ASSIGNMENTS</Text>
-              <Text style={styles.overviewNumber}>
-                {loading ? '—' : assignments.length}
-              </Text>
-              <Text style={styles.overviewHint}>
-                Total assigned tasks
-              </Text>
-            </View>
-
-            <View style={styles.planeIconContainer}>
-              <Text style={styles.planeIcon}>✈</Text>
-            </View>
+        {/* Today's work summary */}
+        <View style={styles.sectionHeader}>
+          <View>
+            <Text style={styles.sectionTitle}>Today's Work</Text>
+            <Text style={styles.sectionSubtitle}>
+              Your assigned ground activities
+            </Text>
           </View>
 
-          <View style={styles.overviewDivider} />
-
-          <View style={styles.overviewStats}>
-            <View style={styles.overviewStat}>
-              <Text style={styles.overviewStatNumber}>
-                {loading ? '—' : inProgressCount}
-              </Text>
-              <Text style={styles.overviewStatLabel}>In progress</Text>
-            </View>
-
-            <View style={styles.overviewStatSeparator} />
-
-            <View style={styles.overviewStat}>
-              <Text style={styles.overviewStatNumber}>
-                {loading ? '—' : completedCount}
-              </Text>
-              <Text style={styles.overviewStatLabel}>Completed</Text>
-            </View>
+          <View style={styles.todayBadge}>
+            <Text style={styles.todayBadgeText}>TODAY</Text>
           </View>
         </View>
 
-        {loading ? (
+        {loadingAssignments ? (
           <View style={styles.messageCard}>
-            <ActivityIndicator size="large" color={BLUE} />
-            <Text style={styles.muted}>Loading your operations...</Text>
+            <ActivityIndicator color={RED} />
+            <Text style={styles.muted}>Loading your assignments...</Text>
           </View>
-        ) : error ? (
-          <View style={styles.errorCard}>
-            <Text style={styles.messageTitle}>Unable to load assignments</Text>
-            <Text style={styles.errorText}>{error}</Text>
+        ) : assignmentError ? (
+          <View style={styles.messageCard}>
+            <Text style={styles.errorText}>{assignmentError}</Text>
           </View>
         ) : (
-          <>
-            <View style={styles.sectionHeader}>
+          <View style={styles.workCard}>
+            <View style={styles.workSummaryTop}>
               <View>
-                <Text style={styles.sectionTitle}>Today's shift</Text>
-                <Text style={styles.sectionSubtitle}>
-                  Your priority assignment for today
+                <Text style={styles.workCount}>
+                  {todaysAssignments.length}
+                </Text>
+                <Text style={styles.workCountLabel}>
+                  Activities assigned
                 </Text>
               </View>
 
-              <View style={styles.todayBadge}>
-                <Text style={styles.todayBadgeText}>TODAY</Text>
-              </View>
-            </View>
-
-            {todaysShift ? (
-              renderAssignmentCard(todaysShift, true)
-            ) : (
-              <View style={styles.emptyShiftCard}>
-                <View style={styles.emptyIconContainer}>
-                  <Text style={styles.emptyIcon}>✈</Text>
-                </View>
-
-                <Text style={styles.emptyTitle}>
-                  No shift scheduled today
+              <View style={styles.workStats}>
+                <Text style={styles.workStatText}>
+                  {pendingCount} Not started
                 </Text>
-
-                <Text style={styles.muted}>
-                  You don't have an assignment dated today. Your other
-                  assignments will appear below.
+                <Text style={styles.workStatText}>
+                  {inProgressCount} In progress
                 </Text>
-              </View>
-            )}
-
-            <View style={styles.sectionHeader}>
-              <View>
-                <Text style={styles.sectionTitle}>
-                  Other assignments
-                </Text>
-                <Text style={styles.sectionSubtitle}>
-                  Your remaining assigned flights and shifts
-                </Text>
-              </View>
-
-              <View style={styles.countBadge}>
-                <Text style={styles.countBadgeText}>
-                  {otherAssignments.length}
+                <Text style={styles.workStatText}>
+                  {completedCount} Completed
                 </Text>
               </View>
             </View>
 
-            {otherAssignments.length === 0 ? (
-              <View style={styles.messageCard}>
-                <Text style={styles.emptyTitle}>
-                  No other assignments
-                </Text>
-                <Text style={styles.muted}>
-                  Any additional assignments from your supervisor will
-                  appear here automatically.
-                </Text>
-              </View>
-            ) : (
-              <View style={styles.assignmentList}>
-                {otherAssignments.map((assignment) =>
-                  renderAssignmentCard(assignment)
-                )}
-              </View>
+            {todaysAssignments.length > 0 && (
+              <Text style={styles.moreAssignments}>
+                View My Tasks for the full assignment list
+              </Text>
             )}
-          </>
+          </View>
         )}
 
-        {updateError ? (
-          <View style={styles.errorCard}>
-            <Text style={styles.errorText}>{updateError}</Text>
-            <Pressable onPress={() => setUpdateError('')}>
-              <Text style={styles.dismissText}>Dismiss</Text>
-            </Pressable>
+        {/* Next assignment */}
+        <View style={styles.sectionHeader}>
+          <View>
+            <Text style={styles.sectionTitle}>Next Assignment</Text>
+            <Text style={styles.sectionSubtitle}>
+              Your next scheduled activity
+            </Text>
           </View>
-        ) : null}
+        </View>
 
+        {loadingAssignments ? (
+          <View style={styles.messageCard}>
+            <ActivityIndicator color={RED} />
+            <Text style={styles.muted}>Checking your next assignment...</Text>
+          </View>
+        ) : nextAssignment ? (
+          <View style={styles.nextAssignmentCard}>
+            <View style={styles.nextAssignmentTop}>
+              <Text style={styles.nextAssignmentEyebrow}>
+                UPCOMING ACTIVITY
+              </Text>
+              <View
+                style={[
+                  styles.taskStatusBadge,
+                  nextAssignment.status === 'In Progress' &&
+                    styles.taskProgressBadge,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.taskStatusText,
+                    nextAssignment.status === 'In Progress' &&
+                      styles.taskProgressText,
+                  ]}
+                >
+                  {nextAssignment.status}
+                </Text>
+              </View>
+            </View>
+
+            <Text style={styles.nextFlight}>
+              {nextAssignment.flightNumber}
+            </Text>
+
+            <Text style={styles.nextActivity}>
+              {nextAssignment.activity}
+            </Text>
+
+            <View style={styles.nextAssignmentDivider} />
+
+            <View style={styles.nextAssignmentDetails}>
+              <View>
+                <Text style={styles.nextDetailLabel}>SCHEDULED DATE</Text>
+                <Text style={styles.nextDetailValue}>
+                  {nextAssignment.shiftDate}
+                </Text>
+              </View>
+
+              <View>
+                <Text style={styles.nextDetailLabel}>SCHEDULED TIME</Text>
+                <Text style={styles.nextDetailValue}>
+                  {nextAssignment.shiftTime}
+                </Text>
+              </View>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.emptyCard}>
+            <View style={styles.emptyIcon}>
+              <Text style={styles.emptyIconText}>✓</Text>
+            </View>
+            <Text style={styles.emptyTitle}>
+              {todaysAssignments.length > 0
+                ? 'All activities completed'
+                : 'No upcoming assignment'}
+            </Text>
+            <Text style={styles.muted}>
+              {todaysAssignments.length > 0
+                ? 'You have completed all the activities currently assigned to you today.'
+                : 'You do not have an upcoming activity scheduled for today. You can still check in and record your attendance.'}
+            </Text>
+          </View>
+        )}
+
+        {/* Helpful information */}
         <View style={styles.infoCard}>
-          <Text style={styles.infoTitle}>Attendance and task records</Text>
-          <Text style={styles.muted}>
-            Check-in and check-out record your shift attendance. Starting
-            and completing a task updates its task status separately.
-            Changes synchronize through Firebase.
+          <Text style={styles.infoTitle}>Remember</Text>
+          <Text style={styles.infoText}>
+            Check in when your working shift begins and check out
+            when it ends. Completing an assigned task does not end
+            your shift or change your attendance status.
           </Text>
         </View>
 
         <Text style={styles.footer}>
-          AeroSync · Ground operations
+          AEROSYNC · GROUND OPERATIONS
         </Text>
       </ScrollView>
     </SafeAreaView>
@@ -703,465 +690,581 @@ export default function HandlerDashboard() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: BG,
+    backgroundColor: BACKGROUND,
   },
+
   content: {
     paddingHorizontal: 20,
-    paddingTop: 12,
+    paddingTop: 14,
     paddingBottom: 40,
     width: '100%',
     maxWidth: 900,
     alignSelf: 'center',
-    gap: 16,
+    gap: 17,
   },
-  topHeader: {
+
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 11,
-    marginBottom: 4,
   },
+
   brandMark: {
-    width: 44,
-    height: 44,
+    width: 45,
+    height: 45,
     borderRadius: 14,
-    backgroundColor: NAVY,
+    backgroundColor: RED,
     alignItems: 'center',
     justifyContent: 'center',
   },
+
   brandMarkText: {
-    color: '#FFFFFF',
+    color: WHITE,
     fontSize: 25,
     fontWeight: '900',
   },
-  brandTextContainer: {
+
+  brandInfo: {
     flex: 1,
-    gap: 3,
+    gap: 2,
   },
-  eyebrow: {
-    color: NAVY,
-    fontSize: 15,
+
+  brandName: {
+    color: CHARCOAL,
+    fontSize: 18,
     fontWeight: '900',
+  },
+
+  brandSubtitle: {
+    color: RED,
+    fontSize: 9,
+    fontWeight: '800',
     letterSpacing: 1,
   },
-  workspaceLabel: {
-    color: MUTED,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 1.1,
-  },
+
   roleBadge: {
-    backgroundColor: '#EAF2FC',
-    borderRadius: 10,
+    backgroundColor: PALE_RED,
+    borderRadius: 9,
     paddingHorizontal: 11,
     paddingVertical: 7,
   },
+
   roleBadgeText: {
-    color: BLUE,
+    color: RED,
     fontSize: 10,
     fontWeight: '900',
-    letterSpacing: 0.7,
+    letterSpacing: 0.6,
   },
+
   greetingSection: {
-    gap: 5,
-    marginTop: 4,
-    marginBottom: 2,
+    gap: 3,
+    marginTop: 5,
   },
-  heading: {
-    color: NAVY,
+
+  greeting: {
+    color: MUTED,
+    fontSize: 17,
+    fontWeight: '600',
+  },
+
+  handlerName: {
+    color: CHARCOAL,
     fontSize: 29,
     fontWeight: '900',
     letterSpacing: -0.7,
   },
-  subtitle: {
+
+  dateText: {
     color: MUTED,
-    fontSize: 14,
-    lineHeight: 21,
+    fontSize: 12,
+    marginTop: 4,
   },
-  overviewCard: {
-    backgroundColor: NAVY,
-    borderRadius: 22,
-    padding: 21,
-    gap: 16,
+
+  attendanceCard: {
+    backgroundColor: WHITE,
+    borderRadius: 21,
+    borderWidth: 1,
+    borderColor: BORDER,
+    padding: 19,
+    gap: 15,
   },
-  overviewTop: {
+
+  attendanceTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+  },
+
+  cardEyebrow: {
+    color: RED,
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+
+  attendanceTitle: {
+    color: CHARCOAL,
+    fontSize: 23,
+    fontWeight: '900',
+    marginTop: 4,
+  },
+
+  statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 6,
+    backgroundColor: '#F0F0F0',
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
-  overviewText: {
-    gap: 5,
+
+  statusBadgeActive: {
+    backgroundColor: '#FFF0F1',
   },
-  overviewLabel: {
-    color: '#DCEBFA',
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1.1,
+
+  statusBadgeComplete: {
+    backgroundColor: '#E8F5EF',
   },
-  overviewNumber: {
-    color: '#FFFFFF',
-    fontSize: 42,
+
+  statusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: MUTED,
+  },
+
+  activeDot: {
+    backgroundColor: RED,
+  },
+
+  completeDot: {
+    backgroundColor: GREEN,
+  },
+
+  statusBadgeText: {
+    color: MUTED,
+    fontSize: 9,
     fontWeight: '900',
   },
-  overviewHint: {
-    color: '#DCEBFA',
-    fontSize: 12,
+
+  activeStatusText: {
+    color: RED,
   },
-  planeIconContainer: {
-    width: 62,
-    height: 62,
-    borderRadius: 20,
-    backgroundColor: '#285780',
-    alignItems: 'center',
-    justifyContent: 'center',
+
+  completeStatusText: {
+    color: GREEN,
   },
-  planeIcon: {
-    color: '#FFFFFF',
-    fontSize: 32,
+
+  attendanceDescription: {
+    color: MUTED,
+    fontSize: 13,
+    lineHeight: 20,
   },
-  overviewDivider: {
-    height: 1,
-    backgroundColor: '#456687',
-  },
-  overviewStats: {
+
+  timeGrid: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: BACKGROUND,
+    borderRadius: 14,
+    padding: 15,
   },
-  overviewStat: {
+
+  timeBlock: {
     flex: 1,
-    gap: 4,
+    gap: 6,
   },
-  overviewStatNumber: {
-    color: '#FFFFFF',
-    fontSize: 21,
-    fontWeight: '800',
+
+  timeLabel: {
+    color: MUTED,
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.7,
   },
-  overviewStatLabel: {
-    color: '#DCEBFA',
+
+  timeValue: {
+    color: CHARCOAL,
+    fontSize: 19,
+    fontWeight: '900',
+  },
+
+  timeDivider: {
+    width: 1,
+    height: 37,
+    backgroundColor: BORDER,
+    marginHorizontal: 14,
+  },
+
+  primaryButton: {
+    minHeight: 51,
+    borderRadius: 13,
+    backgroundColor: RED,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 14,
+  },
+
+  checkoutButton: {
+    minHeight: 51,
+    borderRadius: 13,
+    backgroundColor: CHARCOAL,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 14,
+  },
+
+  buttonText: {
+    color: WHITE,
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+  },
+
+  pressed: {
+    opacity: 0.75,
+  },
+
+  disabledButton: {
+    opacity: 0.6,
+  },
+
+  loadingButton: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+
+  loadingButtonText: {
+    color: MUTED,
     fontSize: 12,
   },
-  overviewStatSeparator: {
-    width: 1,
-    height: 36,
-    backgroundColor: '#456687',
-    marginHorizontal: 18,
+
+  completedBanner: {
+    backgroundColor: '#E8F5EF',
+    borderRadius: 12,
+    padding: 14,
+    alignItems: 'center',
   },
+
+  completedBannerText: {
+    color: GREEN,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+
+  attendanceNote: {
+    color: MUTED,
+    fontSize: 10,
+    textAlign: 'center',
+    lineHeight: 16,
+  },
+
+  durationContainer: {
+    borderTopWidth: 1,
+    borderTopColor: BORDER,
+    paddingTop: 13,
+    gap: 4,
+  },
+
+  durationLabel: {
+    color: MUTED,
+    fontSize: 11,
+  },
+
+  durationValue: {
+    color: CHARCOAL,
+    fontSize: 19,
+    fontWeight: '900',
+  },
+
+  errorText: {
+    color: '#B42318',
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: 'center',
+  },
+
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 10,
-    marginTop: 5,
+    marginTop: 3,
   },
+
   sectionTitle: {
-    color: NAVY,
+    color: CHARCOAL,
     fontSize: 20,
     fontWeight: '900',
   },
+
   sectionSubtitle: {
     color: MUTED,
     fontSize: 12,
-    lineHeight: 18,
-    marginTop: 3,
+    marginTop: 4,
   },
+
   todayBadge: {
-    backgroundColor: '#DCEBFA',
+    backgroundColor: PALE_RED,
     borderRadius: 9,
     paddingHorizontal: 10,
     paddingVertical: 7,
   },
+
   todayBadgeText: {
-    color: NAVY,
-    fontSize: 10,
-    fontWeight: '900',
-    letterSpacing: 0.5,
-  },
-  countBadge: {
-    minWidth: 34,
-    height: 34,
-    paddingHorizontal: 8,
-    borderRadius: 11,
-    backgroundColor: '#EAF2FC',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  countBadgeText: {
-    color: BLUE,
-    fontSize: 13,
+    color: RED,
+    fontSize: 9,
     fontWeight: '900',
   },
-  assignmentList: {
-    gap: 14,
-  },
-  assignmentCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 19,
+
+  workCard: {
+    backgroundColor: WHITE,
+    borderRadius: 17,
     borderWidth: 1,
     borderColor: BORDER,
-    padding: 17,
+    padding: 16,
     gap: 14,
   },
-  featuredAssignmentCard: {
-    borderColor: '#C5D9F1',
-    borderWidth: 1.5,
-    padding: 19,
-  },
-  cardHeader: {
+
+  workSummaryTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: 10,
   },
-  flightInfo: {
+
+  workCount: {
+    color: CHARCOAL,
+    fontSize: 29,
+    fontWeight: '900',
+  },
+
+  workCountLabel: {
+    color: MUTED,
+    fontSize: 11,
+    marginTop: 2,
+  },
+
+  workStats: {
+    alignItems: 'flex-end',
+    gap: 5,
+  },
+
+  workStatText: {
+    color: MUTED,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+
+  assignmentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: BORDER,
+    paddingTop: 13,
+    gap: 10,
+  },
+
+  assignmentMarker: {
+    width: 4,
+    height: 38,
+    borderRadius: 3,
+    backgroundColor: RED,
+  },
+
+  assignmentInfo: {
     flex: 1,
     gap: 3,
   },
-  flightLabel: {
+
+  assignmentFlight: {
+    color: CHARCOAL,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+
+  assignmentActivity: {
+    color: MUTED,
+    fontSize: 11,
+  },
+
+  assignmentTime: {
     color: MUTED,
     fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1,
   },
-  flightNumber: {
-    color: NAVY,
-    fontSize: 24,
-    fontWeight: '900',
+
+  taskStatusBadge: {
+    backgroundColor: '#F0F0F0',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
   },
-  statusBadge: {
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    alignSelf: 'flex-start',
+
+  taskCompletedBadge: {
+    backgroundColor: '#E8F5EF',
   },
-  statusText: {
-    fontSize: 11,
-    fontWeight: '800',
+
+  taskProgressBadge: {
+    backgroundColor: '#FFF3D6',
   },
-  activity: {
-    color: NAVY,
-    fontSize: 15,
-    fontWeight: '700',
-    lineHeight: 22,
-  },
-  detailsContainer: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 12,
-    padding: 12,
-    gap: 11,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: 12,
-  },
-  detailLabel: {
+
+  taskStatusText: {
     color: MUTED,
-    fontSize: 12,
-  },
-  detailValue: {
-    color: NAVY,
-    fontSize: 12,
-    fontWeight: '700',
-    textAlign: 'right',
-    flexShrink: 1,
-  },
-  attendanceCard: {
-    backgroundColor: '#F8FAFC',
-    borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 14,
-    padding: 14,
-    gap: 10,
-  },
-  attendanceHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  attendanceHeading: {
-    color: NAVY,
-    fontSize: 14,
+    fontSize: 9,
     fontWeight: '800',
   },
-  attendanceDot: {
-    width: 9,
-    height: 9,
-    borderRadius: 5,
-    backgroundColor: '#94A3B8',
-  },
-  checkedInDot: {
-    backgroundColor: BLUE,
-  },
-  checkedOutDot: {
-    backgroundColor: GREEN,
-  },
-  attendanceStatus: {
-    color: MUTED,
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  checkedInText: {
-    color: BLUE,
-  },
-  checkedOutText: {
+
+  taskCompletedText: {
     color: GREEN,
   },
-  attendanceDetail: {
-    color: MUTED,
-    fontSize: 12,
-    lineHeight: 18,
+
+  taskProgressText: {
+    color: '#946200',
   },
-  durationRow: {
-    borderTopWidth: 1,
-    borderTopColor: BORDER,
-    paddingTop: 10,
-    gap: 4,
-  },
-  durationLabel: {
-    color: MUTED,
+
+  moreAssignments: {
+    color: RED,
     fontSize: 11,
+    fontWeight: '800',
+    textAlign: 'center',
+    paddingTop: 3,
   },
-  durationValue: {
-    color: NAVY,
-    fontSize: 16,
+
+  emptyCard: {
+    backgroundColor: WHITE,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: BORDER,
+    padding: 22,
+    alignItems: 'center',
+    gap: 10,
+  },
+
+  emptyIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 17,
+    backgroundColor: PALE_RED,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  emptyIconText: {
+    color: RED,
+    fontSize: 26,
+  },
+
+  emptyTitle: {
+    color: CHARCOAL,
+    fontSize: 15,
     fontWeight: '900',
   },
-  taskSection: {
-    gap: 9,
-  },
-  taskHeading: {
-    color: NAVY,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  primaryButton: {
-    backgroundColor: BLUE,
-    borderRadius: 12,
-    minHeight: 46,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 2,
-  },
-  successButton: {
-    backgroundColor: GREEN,
-    borderRadius: 12,
-    minHeight: 46,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 2,
-  },
-  buttonText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  buttonPressed: {
-    opacity: 0.8,
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  completedBanner: {
-    backgroundColor: '#DCFCE7',
-    borderRadius: 11,
-    padding: 12,
-    alignItems: 'center',
-  },
-  completedText: {
-    color: '#166534',
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  emptyShiftCard: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 19,
-    padding: 23,
-    alignItems: 'center',
-    gap: 11,
-  },
-  emptyIconContainer: {
-    width: 56,
-    height: 56,
-    borderRadius: 18,
-    backgroundColor: '#EAF2FC',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyIcon: {
-    color: BLUE,
-    fontSize: 29,
-  },
-  emptyTitle: {
-    color: NAVY,
-    fontSize: 16,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
+
   messageCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
+    backgroundColor: WHITE,
+    borderRadius: 15,
     borderWidth: 1,
     borderColor: BORDER,
-    padding: 24,
+    padding: 22,
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
   },
+
   muted: {
     color: MUTED,
-    fontSize: 13,
-    lineHeight: 20,
-    textAlign: 'center',
-  },
-  errorCard: {
-    backgroundColor: '#FEF2F2',
-    borderWidth: 1,
-    borderColor: '#FECACA',
-    borderRadius: 13,
-    padding: 15,
-    gap: 8,
-  },
-  messageTitle: {
-    color: '#991B1B',
-    fontSize: 15,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  errorText: {
-    color: '#B91C1C',
-    fontSize: 13,
+    fontSize: 12,
     lineHeight: 19,
     textAlign: 'center',
   },
-  dismissText: {
-    color: '#991B1B',
-    fontWeight: '800',
-    textAlign: 'center',
-    padding: 5,
-  },
+
   infoCard: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: BORDER,
+    backgroundColor: '#FCEBED',
     borderRadius: 15,
     padding: 17,
-    gap: 8,
-    marginTop: 3,
+    gap: 7,
   },
+
   infoTitle: {
-    color: NAVY,
-    fontSize: 14,
-    fontWeight: '800',
+    color: DARK_RED,
+    fontSize: 13,
+    fontWeight: '900',
   },
-  footer: {
-    textAlign: 'center',
-    color: MUTED,
+
+  infoText: {
+    color: CHARCOAL,
     fontSize: 12,
+    lineHeight: 19,
+  },
+
+  footer: {
+    color: MUTED,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textAlign: 'center',
+    marginTop: 4,
+  },
+
+  nextAssignmentCard: {
+    backgroundColor: WHITE,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: BORDER,
+    padding: 18,
+    gap: 9,
+  },
+
+  nextAssignmentTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+
+  nextAssignmentEyebrow: {
+    color: RED,
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+  },
+
+  nextFlight: {
+    color: CHARCOAL,
+    fontSize: 27,
+    fontWeight: '900',
+  },
+
+  nextActivity: {
+    color: MUTED,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+
+  nextAssignmentDivider: {
+    height: 1,
+    backgroundColor: BORDER,
+    marginVertical: 5,
+  },
+
+  nextAssignmentDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+
+  nextDetailLabel: {
+    color: MUTED,
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+
+  nextDetailValue: {
+    color: CHARCOAL,
+    fontSize: 13,
+    fontWeight: '800',
     marginTop: 5,
   },
 });

@@ -1,12 +1,11 @@
+
 import { signOut } from 'firebase/auth';
-import {
-  doc,
-  onSnapshot,
-} from 'firebase/firestore';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -17,20 +16,18 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { auth, db } from '@/lib/firebase';
 
-const NAVY = '#163B65';
-const BLUE = '#2878C8';
-const BG = '#F4F6FA';
-const MUTED = '#64748B';
-const BORDER = '#E2E8F0';
+const RED = '#F0182B';
+const DEEP_RED = '#B51F3A';
+const BG = '#F5F5F6';
+const TEXT = '#292929';
+const MUTED = '#737373';
+const BORDER = '#E7E7E9';
 const GREEN = '#15803D';
 
 type UserRole = 'pending' | 'handler' | 'supervisor' | '';
 
 function formatRole(role: UserRole) {
-  if (!role) {
-    return 'Staff';
-  }
-
+  if (!role) return 'Staff';
   return role.charAt(0).toUpperCase() + role.slice(1);
 }
 
@@ -39,7 +36,6 @@ function getInitials(
   email?: string | null
 ) {
   const value = displayName?.trim() || email?.trim() || 'User';
-
   const parts = value.split(/\s+/).filter(Boolean);
 
   if (parts.length >= 2) {
@@ -47,6 +43,14 @@ function getInitials(
   }
 
   return value.slice(0, 2).toUpperCase();
+}
+
+function showMessage(title: string, message: string) {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}\n\n${message}`);
+  } else {
+    Alert.alert(title, message);
+  }
 }
 
 export default function AccountScreen() {
@@ -79,21 +83,15 @@ export default function AccountScreen() {
           const data = snapshot.data();
 
           setDisplayName(
-            data.displayName ??
-              user.displayName ??
-              ''
+            data.displayName ?? user.displayName ?? ''
           );
 
-          setEmail(
-            data.email ??
-              user.email ??
-              ''
-          );
+          setEmail(data.email ?? user.email ?? '');
 
           setRole(
             data.role === 'handler' ||
-              data.role === 'supervisor' ||
-              data.role === 'pending'
+            data.role === 'supervisor' ||
+            data.role === 'pending'
               ? data.role
               : ''
           );
@@ -105,7 +103,6 @@ export default function AccountScreen() {
       },
       (error) => {
         console.error('Could not load account profile:', error);
-
         setDisplayName(user.displayName ?? '');
         setEmail(user.email ?? '');
         setRole('');
@@ -116,8 +113,37 @@ export default function AccountScreen() {
     return unsubscribe;
   }, []);
 
-  async function handleSignOut() {
-    if (signingOut) {
+  async function confirmSignOut() {
+    if (signingOut) return;
+
+    setSigningOut(true);
+
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error('Could not sign out:', error);
+
+      showMessage(
+        'Sign out failed',
+        'We could not sign you out. Please try again.'
+      );
+
+      setSigningOut(false);
+    }
+  }
+
+  function handleSignOut() {
+    if (signingOut) return;
+
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm(
+        'Are you sure you want to sign out of AeroSync?'
+      );
+
+      if (confirmed) {
+        void confirmSignOut();
+      }
+
       return;
     }
 
@@ -132,22 +158,7 @@ export default function AccountScreen() {
         {
           text: 'Sign out',
           style: 'destructive',
-          onPress: async () => {
-            setSigningOut(true);
-
-            try {
-              await signOut(auth);
-            } catch (error) {
-              console.error('Could not sign out:', error);
-
-              Alert.alert(
-                'Sign out failed',
-                'We could not sign you out. Please try again.'
-              );
-
-              setSigningOut(false);
-            }
-          },
+          onPress: () => void confirmSignOut(),
         },
       ]
     );
@@ -160,7 +171,7 @@ export default function AccountScreen() {
     return (
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.loadingScreen}>
-          <ActivityIndicator size="large" color={BLUE} />
+          <ActivityIndicator size="large" color={RED} />
           <Text style={styles.loadingText}>
             Loading your account...
           </Text>
@@ -178,9 +189,7 @@ export default function AccountScreen() {
         <View style={styles.header}>
           <Text style={styles.eyebrow}>AEROSYNC</Text>
 
-          <Text style={styles.title}>
-            My Account
-          </Text>
+          <Text style={styles.title}>My Account</Text>
 
           <Text style={styles.subtitle}>
             Manage your AeroSync profile and account.
@@ -190,30 +199,32 @@ export default function AccountScreen() {
         <View style={styles.profileCard}>
           <View style={styles.profileTop}>
             <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {initials}
-              </Text>
+              <Text style={styles.avatarText}>{initials}</Text>
             </View>
 
             <View style={styles.profileDetails}>
-              <Text
-                style={styles.name}
-                numberOfLines={1}
-              >
+              <Text style={styles.name} numberOfLines={1}>
                 {displayName || 'AeroSync Staff'}
               </Text>
 
-              <Text
-                style={styles.email}
-                numberOfLines={2}
-              >
+              <Text style={styles.email} numberOfLines={2}>
                 {email || 'No email available'}
               </Text>
 
               <View style={styles.activeRow}>
-                <View style={styles.activeDot} />
+                <View
+                  style={[
+                    styles.activeDot,
+                    role === 'pending' && styles.pendingDot,
+                  ]}
+                />
 
-                <Text style={styles.activeText}>
+                <Text
+                  style={[
+                    styles.activeText,
+                    role === 'pending' && styles.pendingText,
+                  ]}
+                >
                   {role === 'pending'
                     ? 'Pending approval'
                     : 'Active account'}
@@ -226,13 +237,8 @@ export default function AccountScreen() {
 
           <View style={styles.roleRow}>
             <View>
-              <Text style={styles.label}>
-                ACCOUNT ROLE
-              </Text>
-
-              <Text style={styles.roleValue}>
-                {roleLabel}
-              </Text>
+              <Text style={styles.label}>ACCOUNT ROLE</Text>
+              <Text style={styles.roleValue}>{roleLabel}</Text>
             </View>
 
             <View style={styles.roleBadge}>
@@ -250,20 +256,12 @@ export default function AccountScreen() {
         <View style={styles.infoCard}>
           <View style={styles.infoRow}>
             <View style={styles.iconBox}>
-              <Text style={styles.iconText}>
-                @
-              </Text>
+              <Text style={styles.iconText}>@</Text>
             </View>
 
             <View style={styles.infoText}>
-              <Text style={styles.infoLabel}>
-                Email address
-              </Text>
-
-              <Text
-                style={styles.infoValue}
-                numberOfLines={2}
-              >
+              <Text style={styles.infoLabel}>Email address</Text>
+              <Text style={styles.infoValue} numberOfLines={2}>
                 {email || 'Not available'}
               </Text>
             </View>
@@ -273,19 +271,12 @@ export default function AccountScreen() {
 
           <View style={styles.infoRow}>
             <View style={styles.iconBox}>
-              <Text style={styles.iconText}>
-                ID
-              </Text>
+              <Text style={styles.iconText}>ID</Text>
             </View>
 
             <View style={styles.infoText}>
-              <Text style={styles.infoLabel}>
-                Account role
-              </Text>
-
-              <Text style={styles.infoValue}>
-                {roleLabel}
-              </Text>
+              <Text style={styles.infoLabel}>Account role</Text>
+              <Text style={styles.infoValue}>{roleLabel}</Text>
             </View>
           </View>
 
@@ -293,16 +284,11 @@ export default function AccountScreen() {
 
           <View style={styles.infoRow}>
             <View style={styles.iconBox}>
-              <Text style={styles.iconText}>
-                ✓
-              </Text>
+              <Text style={styles.iconText}>✓</Text>
             </View>
 
             <View style={styles.infoText}>
-              <Text style={styles.infoLabel}>
-                Access status
-              </Text>
-
+              <Text style={styles.infoLabel}>Access status</Text>
               <Text style={styles.infoValue}>
                 {role === 'pending'
                   ? 'Pending approval'
@@ -312,9 +298,7 @@ export default function AccountScreen() {
           </View>
         </View>
 
-        <Text style={styles.sectionTitle}>
-          AeroSync
-        </Text>
+        <Text style={styles.sectionTitle}>AeroSync</Text>
 
         <View style={styles.menuCard}>
           <Pressable
@@ -323,31 +307,24 @@ export default function AccountScreen() {
               pressed && styles.menuRowPressed,
             ]}
             onPress={() =>
-              Alert.alert(
+              showMessage(
                 'About AeroSync',
                 'AeroSync is a ground operations platform for coordinating staff, baggage handling, incidents and operational activities.'
               )
             }
           >
             <View style={styles.menuIcon}>
-              <Text style={styles.menuIconText}>
-                i
-              </Text>
+              <Text style={styles.menuIconText}>i</Text>
             </View>
 
             <View style={styles.menuText}>
-              <Text style={styles.menuTitle}>
-                About AeroSync
-              </Text>
-
+              <Text style={styles.menuTitle}>About AeroSync</Text>
               <Text style={styles.menuSubtitle}>
                 Ground operations platform
               </Text>
             </View>
 
-            <Text style={styles.chevron}>
-              ›
-            </Text>
+            <Text style={styles.chevron}>›</Text>
           </Pressable>
 
           <View style={styles.infoDivider} />
@@ -358,31 +335,24 @@ export default function AccountScreen() {
               pressed && styles.menuRowPressed,
             ]}
             onPress={() =>
-              Alert.alert(
+              showMessage(
                 'Help & Support',
                 'For account or operational issues, please contact your AeroSync supervisor.'
               )
             }
           >
             <View style={styles.menuIcon}>
-              <Text style={styles.menuIconText}>
-                ?
-              </Text>
+              <Text style={styles.menuIconText}>?</Text>
             </View>
 
             <View style={styles.menuText}>
-              <Text style={styles.menuTitle}>
-                Help & Support
-              </Text>
-
+              <Text style={styles.menuTitle}>Help & Support</Text>
               <Text style={styles.menuSubtitle}>
                 Get assistance with AeroSync
               </Text>
             </View>
 
-            <Text style={styles.chevron}>
-              ›
-            </Text>
+            <Text style={styles.chevron}>›</Text>
           </Pressable>
         </View>
 
@@ -397,16 +367,14 @@ export default function AccountScreen() {
             disabled={signingOut}
           >
             {signingOut ? (
-              <ActivityIndicator color="#B42318" />
+              <ActivityIndicator color={DEEP_RED} />
             ) : (
-              <Text style={styles.signOutText}>
-                Sign out
-              </Text>
+              <Text style={styles.signOutText}>Sign out</Text>
             )}
           </Pressable>
 
           <Text style={styles.footer}>
-            AeroSync · Ground operations
+            AeroSync · Kenya Airways Ground Operations
           </Text>
         </View>
       </ScrollView>
@@ -428,7 +396,7 @@ const styles = StyleSheet.create({
   },
 
   loadingText: {
-    color: NAVY,
+    color: TEXT,
     fontSize: 14,
   },
 
@@ -436,6 +404,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 12,
     paddingBottom: 36,
+    width: '100%',
+    maxWidth: 850,
+    alignSelf: 'center',
   },
 
   header: {
@@ -446,7 +417,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     letterSpacing: 1.4,
-    color: BLUE,
+    color: DEEP_RED,
     marginBottom: 6,
   },
 
@@ -454,7 +425,7 @@ const styles = StyleSheet.create({
     fontSize: 32,
     lineHeight: 38,
     fontWeight: '800',
-    color: NAVY,
+    color: TEXT,
   },
 
   subtitle: {
@@ -470,13 +441,10 @@ const styles = StyleSheet.create({
     padding: 20,
     borderWidth: 1,
     borderColor: BORDER,
-    shadowColor: '#0F172A',
+    shadowColor: '#000000',
     shadowOpacity: 0.06,
     shadowRadius: 14,
-    shadowOffset: {
-      width: 0,
-      height: 6,
-    },
+    shadowOffset: { width: 0, height: 6 },
     elevation: 2,
   },
 
@@ -489,7 +457,7 @@ const styles = StyleSheet.create({
     width: 68,
     height: 68,
     borderRadius: 34,
-    backgroundColor: NAVY,
+    backgroundColor: RED,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 16,
@@ -509,7 +477,7 @@ const styles = StyleSheet.create({
   name: {
     fontSize: 20,
     fontWeight: '800',
-    color: NAVY,
+    color: TEXT,
   },
 
   email: {
@@ -533,10 +501,18 @@ const styles = StyleSheet.create({
     marginRight: 7,
   },
 
+  pendingDot: {
+    backgroundColor: RED,
+  },
+
   activeText: {
     fontSize: 12,
     fontWeight: '700',
     color: GREEN,
+  },
+
+  pendingText: {
+    color: DEEP_RED,
   },
 
   divider: {
@@ -562,18 +538,18 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontSize: 16,
     fontWeight: '700',
-    color: NAVY,
+    color: TEXT,
   },
 
   roleBadge: {
-    backgroundColor: '#EAF3FC',
+    backgroundColor: '#FDECEF',
     borderRadius: 10,
     paddingHorizontal: 11,
     paddingVertical: 7,
   },
 
   roleBadgeText: {
-    color: BLUE,
+    color: DEEP_RED,
     fontSize: 10,
     fontWeight: '800',
     letterSpacing: 0.8,
@@ -584,7 +560,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     fontSize: 14,
     fontWeight: '800',
-    color: NAVY,
+    color: TEXT,
   },
 
   infoCard: {
@@ -605,14 +581,14 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 12,
-    backgroundColor: '#EEF4FA',
+    backgroundColor: '#FDECEF',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 13,
   },
 
   iconText: {
-    color: BLUE,
+    color: DEEP_RED,
     fontSize: 15,
     fontWeight: '800',
   },
@@ -630,7 +606,7 @@ const styles = StyleSheet.create({
   infoValue: {
     fontSize: 15,
     fontWeight: '700',
-    color: NAVY,
+    color: TEXT,
   },
 
   infoDivider: {
@@ -655,21 +631,21 @@ const styles = StyleSheet.create({
   },
 
   menuRowPressed: {
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#FFF5F5',
   },
 
   menuIcon: {
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: '#EEF4FA',
+    backgroundColor: '#FDECEF',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 13,
   },
 
   menuIconText: {
-    color: BLUE,
+    color: DEEP_RED,
     fontSize: 17,
     fontWeight: '800',
   },
@@ -681,7 +657,7 @@ const styles = StyleSheet.create({
   menuTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: NAVY,
+    color: TEXT,
   },
 
   menuSubtitle: {
@@ -693,7 +669,7 @@ const styles = StyleSheet.create({
   chevron: {
     fontSize: 27,
     lineHeight: 27,
-    color: '#94A3B8',
+    color: '#999999',
     marginLeft: 10,
   },
 
@@ -714,7 +690,7 @@ const styles = StyleSheet.create({
   },
 
   signOutPressed: {
-    backgroundColor: '#FFF7F6',
+    backgroundColor: '#FFF5F5',
   },
 
   signOutDisabled: {
@@ -722,7 +698,7 @@ const styles = StyleSheet.create({
   },
 
   signOutText: {
-    color: '#B42318',
+    color: DEEP_RED,
     fontSize: 16,
     fontWeight: '800',
   },
@@ -730,7 +706,7 @@ const styles = StyleSheet.create({
   footer: {
     marginTop: 16,
     fontSize: 11,
-    color: '#94A3B8',
+    color: MUTED,
     textAlign: 'center',
   },
 });

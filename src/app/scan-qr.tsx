@@ -1,27 +1,29 @@
+
+import { nextAction } from '@/features/baggage/handling';
 import {
-    HandlingError,
-    recordHandlingEvent,
+  HandlingError,
+  recordHandlingEvent,
 } from '@/features/baggage/handlingService';
 import { auth, db } from '@/lib/firebase';
 import {
-    CameraView,
-    scanFromURLAsync,
-    useCameraPermissions,
+  CameraView,
+  scanFromURLAsync,
+  useCameraPermissions,
 } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import {
-    doc,
-    getDoc,
+  doc,
+  getDoc,
 } from 'firebase/firestore';
 import { useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -37,10 +39,16 @@ type BaggageRecord = {
 
 type HandlingAction = 'Loading' | 'Offloading';
 
-const NAVY = '#163B65';
-const BLUE = '#2878C8';
-const BG = '#F4F6FA';
-const MUTED = '#64748B';
+const RED = '#C8102E';
+const DARK_RED = '#A20D25';
+const CHARCOAL = '#252525';
+const BG = '#F4F3F3';
+const WHITE = '#FFFFFF';
+const MUTED = '#777777';
+const BORDER = '#E7E7E9';
+const GREEN = '#16805C';
+const PALE_RED = '#FCEBED';
+
 const QR_PREFIX = 'AEROSYNC:BAGGAGE:';
 
 export default function ScanQRScreen() {
@@ -252,7 +260,7 @@ export default function ScanQRScreen() {
     return (
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.center}>
-          <ActivityIndicator size="large" color={NAVY} />
+          <ActivityIndicator size="large" color={RED} />
 
           <Text style={styles.messageText}>
             Checking camera permission…
@@ -295,19 +303,36 @@ export default function ScanQRScreen() {
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.eyebrow}>HANDLER OPERATIONS</Text>
+        {/* Page heading */}
+        <View style={styles.headingSection}>
+          <Text style={styles.eyebrow}>HANDLER OPERATIONS</Text>
 
-        <Text style={styles.heading}>Scan baggage QR</Text>
+          <Text style={styles.heading}>Scan baggage QR</Text>
 
-        <Text style={styles.subtitle}>
-          Scan a registered baggage QR code using your camera or select a QR
-          image from your phone.
-        </Text>
+          <Text style={styles.subtitle}>
+            Scan a registered baggage QR code using your camera or select a QR
+            image from your phone.
+          </Text>
+        </View>
 
         {!baggage && (
           <>
+            {/* Live camera scanner */}
             <View style={styles.cameraCard}>
+              <View style={styles.cameraHeader}>
+                <View>
+                  <Text style={styles.cardEyebrow}>LIVE SCANNER</Text>
+                  <Text style={styles.cardTitle}>Scan baggage</Text>
+                </View>
+
+                <View style={styles.cameraStatus}>
+                  <View style={styles.cameraStatusDot} />
+                  <Text style={styles.cameraStatusText}>READY</Text>
+                </View>
+              </View>
+
               <View style={styles.cameraFrame}>
                 {scanning ? (
                   <CameraView
@@ -324,10 +349,10 @@ export default function ScanQRScreen() {
                       <>
                         <ActivityIndicator
                           size="large"
-                          color={BLUE}
+                          color={RED}
                         />
 
-                        <Text style={styles.messageText}>
+                        <Text style={styles.cameraMessage}>
                           Looking up baggage…
                         </Text>
                       </>
@@ -335,7 +360,7 @@ export default function ScanQRScreen() {
                       <>
                         <Text style={styles.placeholderIcon}>▦</Text>
 
-                        <Text style={styles.messageText}>
+                        <Text style={styles.cameraMessage}>
                           Scanner paused
                         </Text>
                       </>
@@ -358,7 +383,10 @@ export default function ScanQRScreen() {
                 <Pressable
                   accessibilityRole="button"
                   onPress={scanAgain}
-                  style={styles.primaryButton}
+                  style={({ pressed }) => [
+                    styles.primaryButton,
+                    pressed && styles.pressed,
+                  ]}
                 >
                   <Text style={styles.primaryButtonText}>
                     Scan again
@@ -367,22 +395,25 @@ export default function ScanQRScreen() {
               )}
             </View>
 
+            {/* Alternative photo scanning */}
             <View style={styles.orRow}>
               <View style={styles.orLine} />
-
               <Text style={styles.orText}>OR</Text>
-
               <View style={styles.orLine} />
             </View>
 
             <View style={styles.photoCard}>
+              <View style={styles.photoIcon}>
+                <Text style={styles.photoIconText}>▧</Text>
+              </View>
+
               <Text style={styles.photoTitle}>
-                QR code already on this phone?
+                Scan from your Photos
               </Text>
 
               <Text style={styles.photoDescription}>
-                Select an image containing the baggage QR code from your
-                Photos library.
+                Already have a baggage QR code saved on this phone? Select its
+                image here instead of using the camera.
               </Text>
 
               <Pressable
@@ -391,14 +422,15 @@ export default function ScanQRScreen() {
                   selectingImage || lookingUp || saving
                 }
                 onPress={chooseQRFromPhotos}
-                style={[
+                style={({ pressed }) => [
                   styles.secondaryButton,
+                  pressed && styles.pressed,
                   (selectingImage || lookingUp || saving) &&
                     styles.disabledButton,
                 ]}
               >
                 {selectingImage ? (
-                  <ActivityIndicator color={BLUE} />
+                  <ActivityIndicator color={RED} />
                 ) : (
                   <Text style={styles.secondaryButtonText}>
                     Choose QR from Photos
@@ -409,6 +441,7 @@ export default function ScanQRScreen() {
           </>
         )}
 
+        {/* Verified baggage record */}
         {baggage && (
           <View style={styles.recordCard}>
             <View style={styles.successHeader}>
@@ -456,57 +489,104 @@ export default function ScanQRScreen() {
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Current status</Text>
 
-              <Text style={styles.statusValue}>
-                {baggage.status || 'Unknown'}
+              <View style={styles.statusBadge}>
+                <Text style={styles.statusValue}>
+                  {baggage.status || 'Unknown'}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.divider} />
+
+            <View style={styles.actionHeading}>
+              <Text style={styles.sectionTitle}>
+                Record handling event
+              </Text>
+
+              <Text style={styles.formHint}>
+                Select the action performed. Each successful action creates a
+                timestamped event in Firestore.
               </Text>
             </View>
 
-            <Text style={styles.sectionTitle}>
-              Record handling event
-            </Text>
+            {nextAction(baggage.status) === 'Loading' && (
+              <Pressable
+                accessibilityRole="button"
+                disabled={saving}
+                onPress={() => recordHandling('Loading')}
+                style={({ pressed }) => [
+                  styles.primaryButton,
+                  pressed && styles.pressed,
+                  saving && styles.disabledButton,
+                ]}
+              >
+                {saving ? (
+                  <ActivityIndicator color={WHITE} />
+                ) : (
+                  <Text style={styles.primaryButtonText}>
+                    Record Loading
+                  </Text>
+                )}
+              </Pressable>
+            )}
 
-            <Text style={styles.formHint}>
-              Select the action performed by the handler. Each action
-              creates a timestamped event in Firestore.
-            </Text>
+            {nextAction(baggage.status) === 'Offloading' && (
+              <Pressable
+                accessibilityRole="button"
+                disabled={saving}
+                onPress={() => recordHandling('Offloading')}
+                style={({ pressed }) => [
+                  styles.darkButton,
+                  pressed && styles.pressed,
+                  saving && styles.disabledButton,
+                ]}
+              >
+                {saving ? (
+                  <ActivityIndicator color={WHITE} />
+                ) : (
+                  <Text style={styles.primaryButtonText}>
+                    Record Offloading
+                  </Text>
+                )}
+              </Pressable>
+            )}
 
-            <Pressable
-              accessibilityRole="button"
-              disabled={saving}
-              onPress={() => recordHandling('Loading')}
-              style={[
-                styles.primaryButton,
-                saving && styles.disabledButton,
-              ]}
-            >
-              {saving ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.primaryButtonText}>
-                  Record Loading
+            {baggage.status === 'Offloaded' && (
+              <View style={styles.completedBanner}>
+                <View style={styles.completedIcon}>
+                  <Text style={styles.completedIconText}>✓</Text>
+                </View>
+
+                <Text style={styles.completedTitle}>
+                  Handling completed
                 </Text>
-              )}
-            </Pressable>
 
-            <Pressable
-              accessibilityRole="button"
-              disabled={saving}
-              onPress={() => recordHandling('Offloading')}
-              style={[
-                styles.offloadButton,
-                saving && styles.disabledButton,
-              ]}
-            >
-              <Text style={styles.offloadButtonText}>
-                Record Offloading
-              </Text>
-            </Pressable>
+                <Text style={styles.completedBannerText}>
+                  This baggage has been successfully offloaded. No further
+                  handling actions are required.
+                </Text>
+              </View>
+            )}
+
+            {nextAction(baggage.status) === null &&
+              baggage.status !== 'Offloaded' && (
+                <View style={styles.errorCard}>
+                  <Text style={styles.errorText}>
+                    Unrecognised baggage status. Please contact your
+                    supervisor.
+                  </Text>
+                </View>
+              )}
 
             <Pressable
               accessibilityRole="button"
               disabled={saving}
               onPress={scanAgain}
-              style={styles.secondaryButton}
+              style={({ pressed }) => [
+                styles.secondaryButton,
+                pressed && styles.pressed,
+                saving && styles.disabledButton,
+              ]}
             >
               <Text style={styles.secondaryButtonText}>
                 Scan another bag
@@ -516,7 +596,7 @@ export default function ScanQRScreen() {
         )}
 
         <Text style={styles.footer}>
-          AeroSync · Ground crew coordination
+          AEROSYNC · GROUND OPERATIONS
         </Text>
       </ScrollView>
     </SafeAreaView>
@@ -530,56 +610,99 @@ const styles = StyleSheet.create({
   },
 
   content: {
-    padding: 22,
+    paddingHorizontal: 20,
+    paddingTop: 14,
     paddingBottom: 40,
     width: '100%',
     maxWidth: 900,
     alignSelf: 'center',
-    gap: 14,
+    gap: 17,
   },
 
-  center: {
-    flex: 1,
-    padding: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 16,
+  headingSection: {
+    gap: 5,
+    marginBottom: 3,
   },
 
   eyebrow: {
-    color: BLUE,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1.2,
+    color: RED,
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 1.1,
   },
 
   heading: {
-    color: NAVY,
+    color: CHARCOAL,
     fontSize: 28,
-    fontWeight: '800',
+    fontWeight: '900',
+    letterSpacing: -0.5,
   },
 
   subtitle: {
     color: MUTED,
-    fontSize: 14,
-    lineHeight: 21,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+
+  cardEyebrow: {
+    color: RED,
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+
+  cardTitle: {
+    color: CHARCOAL,
+    fontSize: 19,
+    fontWeight: '900',
+    marginTop: 4,
   },
 
   cameraCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 14,
-    gap: 14,
+    backgroundColor: WHITE,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: BORDER,
+    padding: 16,
+    gap: 14,
+  },
+
+  cameraHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 10,
+  },
+
+  cameraStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#F0F0F0',
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+
+  cameraStatusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: GREEN,
+  },
+
+  cameraStatusText: {
+    color: CHARCOAL,
+    fontSize: 9,
+    fontWeight: '900',
   },
 
   cameraFrame: {
     width: '100%',
     height: 350,
     overflow: 'hidden',
-    borderRadius: 12,
-    backgroundColor: '#0F172A',
+    borderRadius: 14,
+    backgroundColor: CHARCOAL,
   },
 
   camera: {
@@ -592,39 +715,97 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 20,
     gap: 12,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: CHARCOAL,
   },
 
   placeholderIcon: {
     fontSize: 42,
-    color: BLUE,
+    color: WHITE,
   },
 
-  cameraHint: {
-    color: MUTED,
-    fontSize: 13,
-    lineHeight: 19,
-    textAlign: 'center',
-  },
-
-  messageText: {
-    color: MUTED,
+  cameraMessage: {
+    color: WHITE,
     fontSize: 14,
     textAlign: 'center',
     lineHeight: 21,
   },
 
+  cameraHint: {
+    color: MUTED,
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: 'center',
+  },
+
   errorCard: {
     padding: 13,
-    borderRadius: 10,
-    backgroundColor: '#FEF2F2',
+    borderRadius: 11,
+    backgroundColor: PALE_RED,
+    borderWidth: 1,
+    borderColor: '#F3D0D5',
   },
 
   errorText: {
-    color: '#B91C1C',
-    fontSize: 14,
-    lineHeight: 20,
+    color: DARK_RED,
+    fontSize: 12,
+    lineHeight: 19,
     textAlign: 'center',
+    fontWeight: '600',
+  },
+
+  primaryButton: {
+    minHeight: 49,
+    borderRadius: 12,
+    backgroundColor: RED,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  primaryButtonText: {
+    color: WHITE,
+    fontSize: 13,
+    fontWeight: '900',
+    textAlign: 'center',
+    letterSpacing: 0.3,
+  },
+
+  darkButton: {
+    minHeight: 49,
+    borderRadius: 12,
+    backgroundColor: CHARCOAL,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  secondaryButton: {
+    minHeight: 47,
+    borderWidth: 1,
+    borderColor: RED,
+    borderRadius: 12,
+    backgroundColor: WHITE,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  secondaryButtonText: {
+    color: RED,
+    fontSize: 12,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+
+  disabledButton: {
+    opacity: 0.6,
+  },
+
+  pressed: {
+    opacity: 0.75,
   },
 
   orRow: {
@@ -636,42 +817,58 @@ const styles = StyleSheet.create({
   orLine: {
     flex: 1,
     height: 1,
-    backgroundColor: '#CBD5E1',
+    backgroundColor: BORDER,
   },
 
   orText: {
     color: MUTED,
-    fontSize: 12,
-    fontWeight: '800',
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 1,
   },
 
   photoCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
+    backgroundColor: WHITE,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    padding: 18,
+    borderColor: BORDER,
+    padding: 19,
     gap: 12,
   },
 
-  photoTitle: {
-    color: NAVY,
-    fontSize: 17,
+  photoIcon: {
+    width: 43,
+    height: 43,
+    borderRadius: 13,
+    backgroundColor: PALE_RED,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  photoIconText: {
+    color: RED,
+    fontSize: 24,
     fontWeight: '800',
+  },
+
+  photoTitle: {
+    color: CHARCOAL,
+    fontSize: 17,
+    fontWeight: '900',
   },
 
   photoDescription: {
     color: MUTED,
-    fontSize: 13,
-    lineHeight: 20,
+    fontSize: 12,
+    lineHeight: 19,
   },
 
   recordCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
+    backgroundColor: WHITE,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    padding: 18,
+    borderColor: BORDER,
+    padding: 19,
     gap: 16,
   },
 
@@ -682,18 +879,18 @@ const styles = StyleSheet.create({
   },
 
   successIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#E5F4EA',
+    width: 44,
+    height: 44,
+    borderRadius: 15,
+    backgroundColor: '#E8F5EF',
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   successIconText: {
-    color: '#21663C',
-    fontSize: 22,
-    fontWeight: '800',
+    color: GREEN,
+    fontSize: 23,
+    fontWeight: '900',
   },
 
   recordInfo: {
@@ -702,106 +899,103 @@ const styles = StyleSheet.create({
   },
 
   sectionTitle: {
-    color: NAVY,
+    color: CHARCOAL,
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '900',
   },
 
   divider: {
     height: 1,
-    backgroundColor: '#E2E8F0',
+    backgroundColor: BORDER,
   },
 
   detailRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     gap: 14,
   },
 
   detailLabel: {
     color: MUTED,
-    fontSize: 13,
+    fontSize: 12,
+    fontWeight: '600',
   },
 
   detailValue: {
-    color: NAVY,
-    fontSize: 13,
-    fontWeight: '700',
+    color: CHARCOAL,
+    fontSize: 12,
+    fontWeight: '800',
     flex: 1,
     textAlign: 'right',
   },
 
+  statusBadge: {
+    backgroundColor: PALE_RED,
+    borderRadius: 9,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+
   statusValue: {
-    color: BLUE,
-    fontSize: 13,
-    fontWeight: '800',
-    flex: 1,
+    color: RED,
+    fontSize: 11,
+    fontWeight: '900',
     textAlign: 'right',
+  },
+
+  actionHeading: {
+    gap: 7,
   },
 
   formHint: {
     color: MUTED,
-    fontSize: 13,
-    lineHeight: 20,
+    fontSize: 12,
+    lineHeight: 19,
   },
 
-  primaryButton: {
-    backgroundColor: BLUE,
-    borderRadius: 10,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
+  completedBanner: {
+    backgroundColor: '#E8F5EF',
+    borderRadius: 14,
+    padding: 17,
+    alignItems: 'center',
+    gap: 8,
+  },
+
+  completedIcon: {
+    width: 39,
+    height: 39,
+    borderRadius: 20,
+    backgroundColor: WHITE,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
-  primaryButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '800',
+  completedIconText: {
+    color: GREEN,
+    fontSize: 21,
+    fontWeight: '900',
+  },
+
+  completedTitle: {
+    color: GREEN,
+    fontSize: 15,
+    fontWeight: '900',
+  },
+
+  completedBannerText: {
+    color: CHARCOAL,
+    fontSize: 12,
+    lineHeight: 19,
     textAlign: 'center',
-  },
-
-  offloadButton: {
-    backgroundColor: NAVY,
-    borderRadius: 10,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  offloadButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '800',
-  },
-
-  secondaryButton: {
-    borderWidth: 1,
-    borderColor: BLUE,
-    borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  secondaryButtonText: {
-    color: BLUE,
-    fontSize: 14,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-
-  disabledButton: {
-    opacity: 0.6,
   },
 
   footer: {
-    textAlign: 'center',
     color: MUTED,
-    fontSize: 12,
-    marginTop: 12,
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textAlign: 'center',
+    marginTop: 4,
   },
 });
