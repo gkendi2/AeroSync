@@ -1,4 +1,3 @@
-
 import { auth, db } from '@/lib/firebase';
 import {
   addDoc,
@@ -10,7 +9,7 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -59,48 +58,51 @@ type CrewAssignment = {
   supervisorUid?: string;
 };
 
-export default function CrewScreen({
-  onBack,
-}: {
-  onBack?: () => void;
-}) {
+type Filter = 'All' | 'On Duty' | 'Off Duty';
+
+const RED = '#C8102E';
+const DARK = '#292929';
+const MUTED = '#777D84';
+const BORDER = '#E8E9EB';
+const GREEN = '#2B914D';
+
+export default function CrewScreen({ onBack }: { onBack?: () => void }) {
   const currentUser = auth.currentUser;
   const isAdmin = currentUser?.uid === ADMIN_UID;
-
-  const scrollViewRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
 
   const [handlers, setHandlers] = useState<Handler[]>([]);
   const [supervisors, setSupervisors] = useState<Supervisor[]>([]);
   const [assignments, setAssignments] = useState<CrewAssignment[]>([]);
 
-  const [selectedHandler, setSelectedHandler] =
-    useState<Handler | null>(null);
-
-  const [selectedSupervisorUid, setSelectedSupervisorUid] =
-    useState(ADMIN_UID);
-
-  const [flightNumber, setFlightNumber] = useState('');
-  const [shiftDate, setShiftDate] = useState('');
-  const [shiftTime, setShiftTime] = useState('');
-  const [activity, setActivity] = useState(ACTIVITIES[0]);
-
-  const [editingAssignment, setEditingAssignment] =
-    useState<CrewAssignment | null>(null);
-
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  const [search, setSearch] = useState('');
+  const [activeFilter, setActiveFilter] = useState<Filter>('All');
+  const [showAssignmentForm, setShowAssignmentForm] = useState(false);
+
+  const [selectedHandler, setSelectedHandler] = useState<Handler | null>(null);
+  const [handlerSearch, setHandlerSearch] = useState('');
+  const [showHandlerPicker, setShowHandlerPicker] = useState(false);
+  const [selectedSupervisorUid, setSelectedSupervisorUid] = useState(ADMIN_UID);
+  const [flightNumber, setFlightNumber] = useState('');
+  const [shiftDate, setShiftDate] = useState('');
+  const [shiftTime, setShiftTime] = useState('');
+  const [activity, setActivity] = useState(ACTIVITIES[0]);
+  const [editingAssignment, setEditingAssignment] =
+    useState<CrewAssignment | null>(null);
+
   useEffect(() => {
     if (!currentUser) {
-      setError('Please sign in to manage crew assignments.');
+      setError('Please sign in to manage crew.');
       setLoading(false);
       return;
     }
 
     const handlersQuery = query(
       collection(db, 'users'),
-      where('role', '==', 'handler'),
+      where('role', '==', 'handler')
     );
 
     const unsubscribeHandlers = onSnapshot(
@@ -113,8 +115,8 @@ export default function CrewScreen({
           }))
           .sort((a, b) =>
             (a.displayName || a.email || '').localeCompare(
-              b.displayName || b.email || '',
-            ),
+              b.displayName || b.email || ''
+            )
           );
 
         setHandlers(results);
@@ -124,7 +126,7 @@ export default function CrewScreen({
         console.error('Handler loading error:', err);
         setError('Unable to load approved handlers.');
         setLoading(false);
-      },
+      }
     );
 
     let unsubscribeSupervisors: (() => void) | undefined;
@@ -132,7 +134,7 @@ export default function CrewScreen({
     if (isAdmin) {
       const supervisorsQuery = query(
         collection(db, 'users'),
-        where('role', '==', 'supervisor'),
+        where('role', '==', 'supervisor')
       );
 
       unsubscribeSupervisors = onSnapshot(
@@ -149,7 +151,7 @@ export default function CrewScreen({
               (supervisor) =>
                 supervisor.uid !== ADMIN_UID &&
                 (!adminEmail ||
-                  supervisor.email?.trim().toLowerCase() !== adminEmail),
+                  supervisor.email?.trim().toLowerCase() !== adminEmail)
             );
 
           setSupervisors(results);
@@ -157,7 +159,7 @@ export default function CrewScreen({
         (err) => {
           console.error('Supervisor loading error:', err);
           setError('Unable to load approved supervisors.');
-        },
+        }
       );
     }
 
@@ -165,7 +167,7 @@ export default function CrewScreen({
       ? collection(db, 'CrewAssignments')
       : query(
           collection(db, 'CrewAssignments'),
-          where('supervisorUid', '==', currentUser.uid),
+          where('supervisorUid', '==', currentUser.uid)
         );
 
     const unsubscribeAssignments = onSnapshot(
@@ -189,8 +191,8 @@ export default function CrewScreen({
 
         results.sort((a, b) =>
           `${a.shiftDate} ${a.shiftTime}`.localeCompare(
-            `${b.shiftDate} ${b.shiftTime}`,
-          ),
+            `${b.shiftDate} ${b.shiftTime}`
+          )
         );
 
         setAssignments(results);
@@ -198,7 +200,7 @@ export default function CrewScreen({
       (err) => {
         console.error('Assignment loading error:', err);
         setError('Unable to load assignments. Check Firestore rules.');
-      },
+      }
     );
 
     return () => {
@@ -208,21 +210,97 @@ export default function CrewScreen({
     };
   }, [currentUser?.uid, isAdmin]);
 
+  const activeAssignments = useMemo(
+    () =>
+      assignments.filter(
+        (item) =>
+          item.status !== 'Cancelled' && item.status !== 'Completed'
+      ),
+    [assignments]
+  );
+
+  const onDutyUids = useMemo(
+    () => new Set(activeAssignments.map((item) => item.handlerUid)),
+    [activeAssignments]
+  );
+
+  const counts = useMemo(
+    () => ({
+      All: handlers.length,
+      'On Duty': handlers.filter((handler) =>
+        onDutyUids.has(handler.uid)
+      ).length,
+      'Off Duty': handlers.filter(
+        (handler) => !onDutyUids.has(handler.uid)
+      ).length,
+    }),
+    [handlers, onDutyUids]
+  );
+
+  const filteredHandlers = useMemo(() => {
+    const term = search.trim().toLowerCase();
+
+    return handlers.filter((handler) => {
+      const onDuty = onDutyUids.has(handler.uid);
+
+      const matchesFilter =
+        activeFilter === 'All' ||
+        (activeFilter === 'On Duty' && onDuty) ||
+        (activeFilter === 'Off Duty' && !onDuty);
+
+      const name = handler.displayName || handler.email || '';
+
+      const matchesSearch =
+        !term ||
+        name.toLowerCase().includes(term) ||
+        (handler.email || '').toLowerCase().includes(term) ||
+        handler.uid.toLowerCase().includes(term);
+
+      return matchesFilter && matchesSearch;
+    });
+  }, [handlers, onDutyUids, activeFilter, search]);
+
+  const availableHandlers = useMemo(() => {
+    const term = handlerSearch.trim().toLowerCase();
+
+    if (!term) return handlers;
+
+    return handlers.filter((handler) => {
+      const name = handler.displayName || handler.email || '';
+
+      return (
+        name.toLowerCase().includes(term) ||
+        (handler.email || '').toLowerCase().includes(term) ||
+        handler.uid.toLowerCase().includes(term)
+      );
+    });
+  }, [handlers, handlerSearch]);
+
   function resetForm() {
     setSelectedHandler(null);
+    setHandlerSearch('');
+    setShowHandlerPicker(false);
     setFlightNumber('');
     setShiftDate('');
     setShiftTime('');
     setActivity(ACTIVITIES[0]);
     setEditingAssignment(null);
     setSelectedSupervisorUid(ADMIN_UID);
+    setShowAssignmentForm(false);
+  }
+
+  function openAssignmentForm(handler?: Handler) {
+    setSelectedHandler(handler || null);
+    setHandlerSearch('');
+    setShowHandlerPicker(false);
+    setEditingAssignment(null);
+    setError('');
+    setShowAssignmentForm(true);
   }
 
   function startEditing(assignment: CrewAssignment) {
-    setEditingAssignment(assignment);
-
     const handler = handlers.find(
-      (item) => item.uid === assignment.handlerUid,
+      (item) => item.uid === assignment.handlerUid
     );
 
     setSelectedHandler(
@@ -230,26 +308,23 @@ export default function CrewScreen({
         uid: assignment.handlerUid,
         displayName: assignment.handlerName,
         role: 'handler',
-      },
+      }
     );
 
+    setHandlerSearch('');
+    setShowHandlerPicker(false);
+    setEditingAssignment(assignment);
     setFlightNumber(assignment.flightNumber);
     setShiftDate(assignment.shiftDate);
     setShiftTime(assignment.shiftTime);
     setActivity(assignment.activity);
 
     if (isAdmin) {
-      setSelectedSupervisorUid(
-        assignment.supervisorUid || ADMIN_UID,
-      );
+      setSelectedSupervisorUid(assignment.supervisorUid || ADMIN_UID);
     }
 
     setError('');
-
-    scrollViewRef.current?.scrollTo({
-      y: 0,
-      animated: true,
-    });
+    setShowAssignmentForm(true);
   }
 
   async function saveAssignment() {
@@ -263,14 +338,10 @@ export default function CrewScreen({
       return;
     }
 
-    if (
-      !flightNumber.trim() ||
-      !shiftDate.trim() ||
-      !shiftTime.trim()
-    ) {
+    if (!flightNumber.trim() || !shiftDate.trim() || !shiftTime.trim()) {
       Alert.alert(
         'Missing details',
-        'Enter the flight number, shift date and shift time.',
+        'Enter the flight number, shift date and shift time.'
       );
       return;
     }
@@ -278,7 +349,7 @@ export default function CrewScreen({
     if (!/^\d{4}-\d{2}-\d{2}$/.test(shiftDate.trim())) {
       Alert.alert(
         'Invalid date',
-        'Use YYYY-MM-DD, for example 2026-11-05.',
+        'Use YYYY-MM-DD, for example 2026-11-05.'
       );
       return;
     }
@@ -315,12 +386,12 @@ export default function CrewScreen({
             ...(isAdmin ? { supervisorUid } : {}),
             updatedBy: currentUser.uid,
             updatedAt: serverTimestamp(),
-          },
+          }
         );
 
         Alert.alert(
           'Assignment updated',
-          'The assignment has been updated successfully.',
+          'The assignment has been updated successfully.'
         );
       } else {
         await addDoc(collection(db, 'CrewAssignments'), {
@@ -333,7 +404,7 @@ export default function CrewScreen({
 
         Alert.alert(
           'Assignment created',
-          'The crew assignment has been saved.',
+          'The crew assignment has been saved.'
         );
       }
 
@@ -343,7 +414,7 @@ export default function CrewScreen({
 
       Alert.alert(
         'Unable to save',
-        'The assignment could not be saved. Check your Firestore rules and try again.',
+        'The assignment could not be saved. Check your Firestore rules and try again.'
       );
     } finally {
       setSaving(false);
@@ -355,39 +426,25 @@ export default function CrewScreen({
 
     const performCancellation = async () => {
       try {
-        console.log('--- CANCELLATION DEBUG ---');
-        console.log('Current UID:', currentUser.uid);
-        console.log('Admin UID:', ADMIN_UID);
-        console.log('Is admin:', currentUser.uid === ADMIN_UID);
-        console.log('Assignment ID:', assignment.id);
-        console.log('Assignment status:', assignment.status);
-        console.log('Supervisor UID:', assignment.supervisorUid);
-        console.log('Handler UID:', assignment.handlerUid);
-
         await updateDoc(
           doc(db, 'CrewAssignments', assignment.id),
           {
             status: 'Cancelled',
             updatedBy: currentUser.uid,
             updatedAt: serverTimestamp(),
-          },
+          }
         );
-
-        console.log('Cancellation successful.');
 
         Alert.alert(
           'Assignment cancelled',
-          `${assignment.flightNumber} has been cancelled.`,
+          `${assignment.flightNumber} has been cancelled.`
         );
       } catch (err: any) {
-        console.error('--- CANCELLATION FAILED ---');
-        console.error('Error code:', err?.code);
-        console.error('Error message:', err?.message);
-        console.error('Full error:', err);
+        console.error('Assignment cancellation failed:', err);
 
         Alert.alert(
           'Unable to cancel',
-          `Error: ${err?.code || 'Unknown'}\n${err?.message || 'No error message available'}`,
+          `Error: ${err?.code || 'Unknown'}\n${err?.message || 'No error message available'}`
         );
       }
     };
@@ -407,21 +464,12 @@ export default function CrewScreen({
           style: 'destructive',
           onPress: () => void performCancellation(),
         },
-      ],
+      ]
     );
   }
 
-  const activeAssignments = assignments.filter(
-    (item) => item.status !== 'Cancelled',
-  );
-
   const canManage = (assignment: CrewAssignment) =>
     isAdmin || assignment.supervisorUid === currentUser?.uid;
-
-  const selectedHandlerName =
-    selectedHandler?.displayName ||
-    selectedHandler?.email ||
-    'No handler selected';
 
   const getSupervisorName = (uid?: string) => {
     if (!uid || uid === ADMIN_UID) return 'Gloria (Administrator)';
@@ -435,725 +483,1180 @@ export default function CrewScreen({
     );
   };
 
+  function handleBack() {
+    if (showAssignmentForm) {
+      resetForm();
+    } else {
+      onBack?.();
+    }
+  }
+
   return (
-
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView
-        ref={scrollViewRef}
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
-        <Pressable onPress={onBack} disabled={!onBack}>
-          <Text style={styles.backText}>← Dashboard</Text>
-        </Pressable>
+      <View style={styles.screen}>
+        {/* HEADER */}
+        <View style={styles.header}>
+          <Pressable onPress={handleBack} style={styles.backButton}>
+            <Text style={styles.backIcon}>‹</Text>
+          </Pressable>
 
-        <Text style={styles.eyebrow}>SUPERVISOR OPERATIONS</Text>
-        <Text style={styles.heading}>Crew coordination</Text>
-        <Text style={styles.subtitle}>
-          Manage handlers, flight assignments and baggage-handling shifts.
-        </Text>
-
-        <View style={styles.overviewCard}>
-          <Text style={styles.overviewTitle}>
-            {isAdmin ? 'Administrator overview' : 'Team overview'}
+          <Text style={styles.heading}>
+            {showAssignmentForm ? 'Crew assignment' : 'Crew'}
           </Text>
 
-          <View style={styles.metrics}>
-            <View style={styles.metric}>
-              <Text style={styles.metricNumber}>{handlers.length}</Text>
-              <Text style={styles.metricLabel}>Approved handlers</Text>
-            </View>
-
-            <View style={styles.metric}>
-              <Text style={styles.metricNumber}>
-                {activeAssignments.length}
-              </Text>
-              <Text style={styles.metricLabel}>Active assignments</Text>
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.sectionHeading}>
-          <Text style={styles.sectionNumber}>1</Text>
-          <View style={styles.sectionHeadingText}>
-            <Text style={styles.sectionTitle}>
-              {editingAssignment ? 'Edit assignment' : 'Select a handler'}
-            </Text>
-            <Text style={styles.muted}>
-              Choose the approved crew member for the task.
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.card}>
-          {loading ? (
-            <ActivityIndicator color={RED} />
-          ) : handlers.length === 0 ? (
-            <Text style={styles.muted}>
-              No approved handlers are currently available.
-            </Text>
+          {!showAssignmentForm ? (
+            <Pressable
+              onPress={() => openAssignmentForm()}
+              style={styles.addButton}
+              accessibilityLabel="Create crew assignment"
+            >
+              <Text style={styles.addIcon}>＋</Text>
+            </Pressable>
           ) : (
-            handlers.map((handler) => {
-              const selected = selectedHandler?.uid === handler.uid;
-              const name =
-                handler.displayName ||
-                handler.email ||
-                'Name not provided';
-
-              return (
-                <Pressable
-                  key={handler.uid}
-                  onPress={() => setSelectedHandler(handler)}
-                  style={[
-                    styles.handlerOption,
-                    selected && styles.selectedOption,
-                  ]}
-                >
-                  <View style={styles.avatar}>
-                    <Text style={styles.avatarText}>
-                      {name.charAt(0).toUpperCase()}
-                    </Text>
-                  </View>
-
-                  <View style={styles.handlerInfo}>
-                    <Text style={styles.handlerName}>{name}</Text>
-                    <Text style={styles.muted}>
-                      {handler.email || 'Email not available'}
-                    </Text>
-                  </View>
-
-                  <Text style={styles.check}>
-                    {selected ? '✓' : '○'}
-                  </Text>
-                </Pressable>
-              );
-            })
+            <Pressable onPress={resetForm} style={styles.cancelHeaderButton}>
+              <Text style={styles.cancelHeaderText}>Cancel</Text>
+            </Pressable>
           )}
         </View>
 
-        {isAdmin && (
-          <>
-            <View style={styles.sectionHeading}>
-              <Text style={styles.sectionNumber}>2</Text>
-              <View style={styles.sectionHeadingText}>
-                <Text style={styles.sectionTitle}>Assignment owner</Text>
-                <Text style={styles.muted}>
-                  Select which supervisor will manage this assignment.
+        {showAssignmentForm ? (
+          <ScrollView
+            contentContainerStyle={styles.formContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            <Text style={styles.formIntroTitle}>
+              {editingAssignment ? 'Edit assignment' : 'Assign crew member'}
+            </Text>
+
+            <Text style={styles.formIntro}>
+              Select a handler and enter the flight and shift details.
+            </Text>
+
+            <View style={styles.formCard}>
+              <Text style={styles.fieldLabel}>SELECT HANDLER</Text>
+
+              {loading ? (
+                <ActivityIndicator color={RED} />
+              ) : handlers.length === 0 ? (
+                <Text style={styles.helperText}>
+                  No approved handlers are currently available.
                 </Text>
-              </View>
-            </View>
-
-            <View style={styles.card}>
-              <Pressable
-                onPress={() => setSelectedSupervisorUid(ADMIN_UID)}
-                style={[
-                  styles.handlerOption,
-                  selectedSupervisorUid === ADMIN_UID &&
-                    styles.selectedOption,
-                ]}
-              >
-                <View style={styles.avatar}>
-                  <Text style={styles.avatarText}>G</Text>
-                </View>
-
-                <View style={styles.handlerInfo}>
-                  <Text style={styles.handlerName}>Gloria</Text>
-                  <Text style={styles.muted}>Administrator</Text>
-                </View>
-
-                <Text style={styles.check}>
-                  {selectedSupervisorUid === ADMIN_UID ? '✓' : '○'}
-                </Text>
-              </Pressable>
-
-              {supervisors.map((supervisor) => {
-                const name =
-                  supervisor.displayName ||
-                  supervisor.email ||
-                  'Supervisor';
-
-                const selected =
-                  selectedSupervisorUid === supervisor.uid;
-
-                return (
+              ) : (
+                <>
                   <Pressable
-                    key={supervisor.uid}
-                    onPress={() =>
-                      setSelectedSupervisorUid(supervisor.uid)
-                    }
+                    onPress={() => setShowHandlerPicker((visible) => !visible)}
                     style={[
-                      styles.handlerOption,
-                      selected && styles.selectedOption,
+                      styles.selectedHandlerBox,
+                      showHandlerPicker && styles.selectedHandlerBoxOpen,
                     ]}
                   >
-                    <View style={styles.avatar}>
-                      <Text style={styles.avatarText}>
-                        {name.charAt(0).toUpperCase()}
-                      </Text>
+                    {selectedHandler ? (
+                      <>
+                        <View style={styles.avatarSmall}>
+                          <Text style={styles.avatarInitial}>
+                            {(selectedHandler.displayName ||
+                              selectedHandler.email ||
+                              'H').charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
+
+                        <View style={styles.handlerInfo}>
+                          <Text style={styles.handlerName}>
+                            {selectedHandler.displayName ||
+                              selectedHandler.email ||
+                              'Selected handler'}
+                          </Text>
+                          <Text style={styles.helperText}>
+                            {selectedHandler.email || 'Approved handler'}
+                          </Text>
+                        </View>
+                      </>
+                    ) : (
+                      <View style={styles.handlerInfo}>
+                        <Text style={styles.handlerPlaceholder}>
+                          Choose an approved handler
+                        </Text>
+                      </View>
+                    )}
+
+                    <Text style={styles.pickerChevron}>
+                      {showHandlerPicker ? '⌃' : '⌄'}
+                    </Text>
+                  </Pressable>
+
+                  {showHandlerPicker && (
+                    <View style={styles.handlerPicker}>
+                      <TextInput
+                        value={handlerSearch}
+                        onChangeText={setHandlerSearch}
+                        placeholder="Search handlers by name or email"
+                        placeholderTextColor="#9299A0"
+                        autoCapitalize="none"
+                        style={styles.pickerSearch}
+                      />
+
+                      <ScrollView
+                        style={styles.handlerPickerList}
+                        nestedScrollEnabled
+                        keyboardShouldPersistTaps="handled"
+                        showsVerticalScrollIndicator
+                      >
+                        {availableHandlers.length === 0 ? (
+                          <Text style={styles.pickerEmpty}>
+                            No handlers match your search.
+                          </Text>
+                        ) : (
+                          availableHandlers.map((handler) => {
+                            const name =
+                              handler.displayName ||
+                              handler.email ||
+                              'Name not provided';
+
+                            const selected =
+                              selectedHandler?.uid === handler.uid;
+
+                            return (
+                              <Pressable
+                                key={handler.uid}
+                                onPress={() => {
+                                  setSelectedHandler(handler);
+                                  setShowHandlerPicker(false);
+                                  setHandlerSearch('');
+                                }}
+                                style={[
+                                  styles.handlerOption,
+                                  selected && styles.selectedOption,
+                                ]}
+                              >
+                                <View style={styles.avatarSmall}>
+                                  <Text style={styles.avatarInitial}>
+                                    {name.charAt(0).toUpperCase()}
+                                  </Text>
+                                </View>
+
+                                <View style={styles.handlerInfo}>
+                                  <Text style={styles.handlerName}>
+                                    {name}
+                                  </Text>
+                                  <Text style={styles.helperText}>
+                                    {handler.email || 'Email not available'}
+                                  </Text>
+                                </View>
+
+                                <Text style={styles.check}>
+                                  {selected ? '✓' : '○'}
+                                </Text>
+                              </Pressable>
+                            );
+                          })
+                        )}
+                      </ScrollView>
+                    </View>
+                  )}
+                </>
+              )}
+
+              {isAdmin && (
+                <>
+                  <Text style={styles.fieldLabel}>ASSIGNMENT OWNER</Text>
+
+                  <Pressable
+                    onPress={() => setSelectedSupervisorUid(ADMIN_UID)}
+                    style={[
+                      styles.handlerOption,
+                      selectedSupervisorUid === ADMIN_UID &&
+                        styles.selectedOption,
+                    ]}
+                  >
+                    <View style={styles.avatarSmall}>
+                      <Text style={styles.avatarInitial}>G</Text>
                     </View>
 
                     <View style={styles.handlerInfo}>
-                      <Text style={styles.handlerName}>{name}</Text>
-                      <Text style={styles.muted}>
-                        {supervisor.email || 'Approved supervisor'}
-                      </Text>
+                      <Text style={styles.handlerName}>Gloria</Text>
+                      <Text style={styles.helperText}>Administrator</Text>
                     </View>
 
                     <Text style={styles.check}>
-                      {selected ? '✓' : '○'}
+                      {selectedSupervisorUid === ADMIN_UID ? '✓' : '○'}
                     </Text>
                   </Pressable>
-                );
-              })}
-            </View>
-          </>
-        )}
 
-        <View style={styles.sectionHeading}>
-          <Text style={styles.sectionNumber}>{isAdmin ? '3' : '2'}</Text>
-          <View style={styles.sectionHeadingText}>
-            <Text style={styles.sectionTitle}>Assignment details</Text>
-            <Text style={styles.muted}>
-              Enter the flight, shift and activity.
-            </Text>
-          </View>
-        </View>
+                  {supervisors.map((supervisor) => {
+                    const name =
+                      supervisor.displayName ||
+                      supervisor.email ||
+                      'Supervisor';
 
-        <View style={styles.card}>
-          <Text style={styles.fieldLabel}>FLIGHT NUMBER</Text>
-          <TextInput
-            value={flightNumber}
-            onChangeText={setFlightNumber}
-            placeholder="e.g. KQ100"
-            placeholderTextColor="#94A3B8"
-            autoCapitalize="characters"
-            style={styles.input}
-          />
+                    const selected =
+                      selectedSupervisorUid === supervisor.uid;
 
-          <Text style={styles.fieldLabel}>SHIFT DATE</Text>
-          <TextInput
-            value={shiftDate}
-            onChangeText={setShiftDate}
-            placeholder="YYYY-MM-DD"
-            placeholderTextColor="#94A3B8"
-            style={styles.input}
-          />
+                    return (
+                      <Pressable
+                        key={supervisor.uid}
+                        onPress={() =>
+                          setSelectedSupervisorUid(supervisor.uid)
+                        }
+                        style={[
+                          styles.handlerOption,
+                          selected && styles.selectedOption,
+                        ]}
+                      >
+                        <View style={styles.avatarSmall}>
+                          <Text style={styles.avatarInitial}>
+                            {name.charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
 
-          <Text style={styles.fieldLabel}>SHIFT TIME</Text>
-          <TextInput
-            value={shiftTime}
-            onChangeText={setShiftTime}
-            placeholder="06:00-14:00"
-            placeholderTextColor="#94A3B8"
-            style={styles.input}
-          />
+                        <View style={styles.handlerInfo}>
+                          <Text style={styles.handlerName}>{name}</Text>
+                          <Text style={styles.helperText}>
+                            {supervisor.email || 'Approved supervisor'}
+                          </Text>
+                        </View>
 
-          <Text style={styles.fieldLabel}>BAGGAGE-HANDLING ACTIVITY</Text>
+                        <Text style={styles.check}>
+                          {selected ? '✓' : '○'}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </>
+              )}
 
-          {ACTIVITIES.map((item) => (
-            <Pressable
-              key={item}
-              onPress={() => setActivity(item)}
-              style={[
-                styles.activityOption,
-                activity === item && styles.selectedOption,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.activityText,
-                  activity === item && styles.selectedActivityText,
-                ]}
-              >
-                {activity === item ? '●' : '○'}  {item}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
+              <View style={styles.fieldDivider} />
 
-        {selectedHandler && (
-          <View style={styles.previewCard}>
-            <Text style={styles.previewTitle}>Assignment preview</Text>
-            <Text style={styles.previewText}>
-              Handler: {selectedHandlerName}
-            </Text>
-            <Text style={styles.previewText}>
-              Flight: {flightNumber.trim().toUpperCase() || 'Not entered'}
-            </Text>
-            <Text style={styles.previewText}>
-              Shift: {shiftDate || 'Not entered'} · {shiftTime || 'Not entered'}
-            </Text>
-            <Text style={styles.previewText}>Activity: {activity}</Text>
-            {isAdmin && (
-              <Text style={styles.previewText}>
-                Owner: {getSupervisorName(selectedSupervisorUid)}
-              </Text>
-            )}
-          </View>
-        )}
+              <Text style={styles.fieldLabel}>FLIGHT NUMBER</Text>
+              <TextInput
+                value={flightNumber}
+                onChangeText={setFlightNumber}
+                placeholder="e.g. KQ100"
+                placeholderTextColor="#9299A0"
+                autoCapitalize="characters"
+                style={styles.input}
+              />
 
-        <Pressable
-          onPress={() => void saveAssignment()}
-          disabled={saving || loading || handlers.length === 0}
-          style={[
-            styles.saveButton,
-            (saving || loading || handlers.length === 0) &&
-              styles.disabledButton,
-          ]}
-        >
-          {saving ? (
-            <ActivityIndicator color="#FFFFFF" />
-          ) : (
-            <Text style={styles.saveButtonText}>
-              {editingAssignment ? 'Save changes' : 'Create assignment'}
-            </Text>
-          )}
-        </Pressable>
-
-        {editingAssignment && (
-          <Pressable onPress={resetForm} style={styles.secondaryButton}>
-            <Text style={styles.secondaryButtonText}>Stop editing</Text>
-          </Pressable>
-        )}
-
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-        <View style={styles.savedHeader}>
-          <View>
-            <Text style={styles.sectionTitle}>Current assignments</Text>
-            <Text style={styles.muted}>
-              Assignments saved in Firestore.
-            </Text>
-          </View>
-
-          <View style={styles.countBadge}>
-            <Text style={styles.countText}>{assignments.length}</Text>
-          </View>
-        </View>
-
-        {assignments.length === 0 ? (
-          <View style={styles.card}>
-            <Text style={styles.muted}>No assignments found.</Text>
-          </View>
-        ) : (
-          assignments.map((assignment) => (
-            <View key={assignment.id} style={styles.assignmentCard}>
-              <View style={styles.assignmentTop}>
-                <View>
-                  <Text style={styles.fieldLabel}>FLIGHT</Text>
-                  <Text style={styles.flightTitle}>
-                    {assignment.flightNumber}
-                  </Text>
+              <View style={styles.shiftRow}>
+                <View style={styles.shiftField}>
+                  <Text style={styles.fieldLabel}>SHIFT DATE</Text>
+                  <TextInput
+                    value={shiftDate}
+                    onChangeText={setShiftDate}
+                    placeholder="YYYY-MM-DD"
+                    placeholderTextColor="#9299A0"
+                    style={styles.input}
+                  />
                 </View>
 
-                <View
-                  style={[
-                    styles.statusBadge,
-                    assignment.status === 'Cancelled' &&
-                      styles.cancelledBadge,
-                  ]}
-                >
-                  <Text style={styles.statusText}>
-                    {assignment.status}
-                  </Text>
+                <View style={styles.shiftField}>
+                  <Text style={styles.fieldLabel}>SHIFT TIME</Text>
+                  <TextInput
+                    value={shiftTime}
+                    onChangeText={setShiftTime}
+                    placeholder="06:00-14:00"
+                    placeholderTextColor="#9299A0"
+                    style={styles.input}
+                  />
                 </View>
               </View>
 
-              <View style={styles.cardDivider} />
-
-              <Text style={styles.assignmentName}>
-                {assignment.handlerName}
+              <Text style={styles.fieldLabel}>
+                BAGGAGE-HANDLING ACTIVITY
               </Text>
 
-              <Text style={styles.assignmentDetail}>
-                {assignment.shiftDate} · {assignment.shiftTime}
-              </Text>
+              {ACTIVITIES.map((item) => (
+                <Pressable
+                  key={item}
+                  onPress={() => setActivity(item)}
+                  style={[
+                    styles.activityOption,
+                    activity === item && styles.selectedOption,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.activityText,
+                      activity === item && styles.selectedActivityText,
+                    ]}
+                  >
+                    {activity === item ? '●' : '○'} {item}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
 
-              <Text style={styles.assignmentActivity}>
-                {assignment.activity}
-              </Text>
+            {selectedHandler && (
+              <View style={styles.previewCard}>
+                <Text style={styles.previewTitle}>Assignment preview</Text>
 
-              {isAdmin && (
-                <Text style={styles.ownerText}>
-                  Owner: {getSupervisorName(assignment.supervisorUid)}
+                <Text style={styles.previewText}>
+                  Handler: {selectedHandler.displayName ||
+                    selectedHandler.email}
+                </Text>
+
+                <Text style={styles.previewText}>
+                  Flight: {flightNumber.trim().toUpperCase() || 'Not entered'}
+                </Text>
+
+                <Text style={styles.previewText}>
+                  Shift: {shiftDate || 'Not entered'} · {shiftTime || 'Not entered'}
+                </Text>
+
+                <Text style={styles.previewText}>Activity: {activity}</Text>
+
+                {isAdmin && (
+                  <Text style={styles.previewText}>
+                    Owner: {getSupervisorName(selectedSupervisorUid)}
+                  </Text>
+                )}
+              </View>
+            )}
+
+            {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+            <Pressable
+              onPress={() => void saveAssignment()}
+              disabled={saving || loading || handlers.length === 0}
+              style={[
+                styles.primaryButton,
+                (saving || loading || handlers.length === 0) &&
+                  styles.disabledButton,
+              ]}
+            >
+              {saving ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.primaryButtonText}>
+                  {editingAssignment ? 'Save changes' : 'Create assignment'}
                 </Text>
               )}
+            </Pressable>
 
-              {canManage(assignment) &&
-                assignment.status !== 'Cancelled' &&
-                assignment.status !== 'Completed' && (
-                  <View style={styles.actionRow}>
-                    <Pressable
-                      onPress={() => startEditing(assignment)}
-                      style={styles.editButton}
-                    >
-                      <Text style={styles.editButtonText}>Edit</Text>
-                    </Pressable>
+            {editingAssignment && (
+              <Pressable onPress={resetForm} style={styles.secondaryButton}>
+                <Text style={styles.secondaryButtonText}>Stop editing</Text>
+              </Pressable>
+            )}
 
-                    <Pressable
-                      onPress={() => void cancelAssignment(assignment)}
-                      style={styles.cancelButton}
-                    >
-                      <Text style={styles.cancelButtonText}>Cancel</Text>
-                    </Pressable>
-                  </View>
-                )}
+            <View style={styles.savedHeader}>
+              <Text style={styles.sectionTitle}>Current assignments</Text>
+              <Text style={styles.countText}>{assignments.length}</Text>
             </View>
-          ))
-        )}
 
-        <Text style={styles.footer}>
-          AeroSync · Ground crew coordination
-        </Text>
-      </ScrollView>
+            {assignments.length === 0 ? (
+              <View style={styles.emptyBox}>
+                <Text style={styles.helperText}>No assignments found.</Text>
+              </View>
+            ) : (
+              assignments.map((assignment) => (
+                <View key={assignment.id} style={styles.assignmentCard}>
+                  <View style={styles.assignmentTop}>
+                    <View>
+                      <Text style={styles.fieldLabel}>FLIGHT</Text>
+                      <Text style={styles.flightTitle}>
+                        {assignment.flightNumber}
+                      </Text>
+                    </View>
+
+                    <View
+                      style={[
+                        styles.assignmentStatus,
+                        assignment.status === 'Cancelled' &&
+                          styles.cancelledStatus,
+                      ]}
+                    >
+                      <Text style={styles.assignmentStatusText}>
+                        {assignment.status}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <Text style={styles.assignmentName}>
+                    {assignment.handlerName}
+                  </Text>
+
+                  <Text style={styles.helperText}>
+                    {assignment.shiftDate} · {assignment.shiftTime}
+                  </Text>
+
+                  <Text style={styles.assignmentActivity}>
+                    {assignment.activity}
+                  </Text>
+
+                  {isAdmin && (
+                    <Text style={styles.helperText}>
+                      Owner: {getSupervisorName(assignment.supervisorUid)}
+                    </Text>
+                  )}
+
+                  {canManage(assignment) &&
+                    assignment.status !== 'Cancelled' &&
+                    assignment.status !== 'Completed' && (
+                      <View style={styles.actionRow}>
+                        <Pressable
+                          onPress={() => startEditing(assignment)}
+                          style={styles.editButton}
+                        >
+                          <Text style={styles.editButtonText}>Edit</Text>
+                        </Pressable>
+
+                        <Pressable
+                          onPress={() => void cancelAssignment(assignment)}
+                          style={styles.cancelButton}
+                        >
+                          <Text style={styles.cancelButtonText}>Cancel</Text>
+                        </Pressable>
+                      </View>
+                    )}
+                </View>
+              ))
+            )}
+          </ScrollView>
+        ) : (
+          <>
+            {/* STATUS FILTERS */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.filterScroll}
+              contentContainerStyle={styles.filterContent}
+            >
+              {(['All', 'On Duty', 'Off Duty'] as Filter[]).map((filter) => (
+                <Pressable
+                  key={filter}
+                  onPress={() => setActiveFilter(filter)}
+                  style={[
+                    styles.filterChip,
+                    activeFilter === filter && styles.filterChipActive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.filterText,
+                      activeFilter === filter && styles.filterTextActive,
+                    ]}
+                  >
+                    {filter} ({counts[filter]})
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+
+            {/* SEARCH */}
+            <View style={styles.searchBar}>
+              <Text style={styles.searchIcon}>⌕</Text>
+
+              <TextInput
+                value={search}
+                onChangeText={setSearch}
+                placeholder="Search by name or ID..."
+                placeholderTextColor="#9299A0"
+                style={styles.searchInput}
+                autoCapitalize="none"
+              />
+
+              {search.length > 0 && (
+                <Pressable onPress={() => setSearch('')}>
+                  <Text style={styles.clearSearch}>×</Text>
+                </Pressable>
+              )}
+            </View>
+
+            {/* CREW REGISTER */}
+            <ScrollView
+              style={styles.list}
+              contentContainerStyle={styles.listContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {loading ? (
+                <View style={styles.emptyState}>
+                  <ActivityIndicator color={RED} size="large" />
+                  <Text style={styles.helperText}>Loading crew...</Text>
+                </View>
+              ) : filteredHandlers.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyTitle}>No crew members found</Text>
+                  <Text style={styles.helperText}>
+                    Try another search or status filter.
+                  </Text>
+                </View>
+              ) : (
+                filteredHandlers.map((handler) => {
+                  const name =
+                    handler.displayName ||
+                    handler.email ||
+                    'Name not provided';
+
+                  const onDuty = onDutyUids.has(handler.uid);
+
+                  return (
+                    <Pressable
+                      key={handler.uid}
+                      onPress={() => openAssignmentForm(handler)}
+                      style={({ pressed }) => [
+                        styles.crewRow,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <View style={styles.photoPlaceholder}>
+                        <Text style={styles.photoInitial}>
+                          {name.charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+
+                      <View style={styles.crewInfo}>
+                        <Text style={styles.crewName} numberOfLines={1}>
+                          {name}
+                        </Text>
+
+                        <Text style={styles.crewMeta} numberOfLines={1}>
+                          {handler.email || 'Handler'}
+                          {' · Handler'}
+                        </Text>
+                      </View>
+
+                      <View style={styles.dutyStatus}>
+                        <View
+                          style={[
+                            styles.dutyDot,
+                            !onDuty && styles.offDutyDot,
+                          ]}
+                        />
+
+                        <Text style={styles.dutyText}>
+                          {onDuty ? 'On Duty' : 'Off Duty'}
+                        </Text>
+                      </View>
+
+                      <Text style={styles.chevron}>›</Text>
+                    </Pressable>
+                  );
+                })
+              )}
+
+              <View style={{ height: 105 }} />
+            </ScrollView>
+          </>
+        )}
+      </View>
     </SafeAreaView>
   );
 }
 
-const RED = '#C8102E';
-const DARK = '#292929';
-const BG = '#F5F5F5';
-const MUTED = '#707070';
-const BORDER = '#E5E5E5';
-
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: BG,
+    backgroundColor: '#FFFFFF',
   },
-  content: {
-    padding: 20,
-    paddingBottom: 45,
-    width: '100%',
-    maxWidth: 900,
-    alignSelf: 'center',
-  },
-  backText: {
-    color: RED,
-    fontSize: 13,
-    fontWeight: '700',
-    marginBottom: 20,
-  },
-  eyebrow: {
-    color: RED,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1,
-  },
-  heading: {
-    color: DARK,
-    fontSize: 27,
-    fontWeight: '800',
-    marginTop: 5,
-  },
-  subtitle: {
-    color: MUTED,
-    fontSize: 13,
-    lineHeight: 20,
-    marginTop: 6,
-    marginBottom: 20,
-  },
-  overviewCard: {
-    backgroundColor: DARK,
-    borderRadius: 17,
-    padding: 19,
-    marginBottom: 25,
-  },
-  overviewTitle: {
-    color: '#FFFFFF',
-    fontSize: 17,
-    fontWeight: '800',
-  },
-  metrics: {
-    flexDirection: 'row',
-    marginTop: 18,
-  },
-  metric: {
+
+  screen: {
     flex: 1,
+    width: '100%',
+    maxWidth: 760,
+    alignSelf: 'center',
+    paddingHorizontal: 19,
+    backgroundColor: '#FFFFFF',
   },
-  metricNumber: {
-    color: '#FFFFFF',
-    fontSize: 28,
-    fontWeight: '800',
-  },
-  metricLabel: {
-    color: '#DDDDDD',
-    fontSize: 11,
-    marginTop: 3,
-  },
-  sectionHeading: {
+
+  /* HEADER */
+  header: {
+    height: 66,
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 10,
-    marginTop: 8,
+    gap: 12,
   },
-  sectionNumber: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: RED,
-    color: '#FFFFFF',
-    textAlign: 'center',
-    lineHeight: 30,
-    fontWeight: '800',
+
+  backButton: {
+    width: 27,
+    height: 42,
+    justifyContent: 'center',
   },
-  sectionHeadingText: {
-    flex: 1,
-    marginLeft: 10,
-  },
-  sectionTitle: {
+
+  backIcon: {
     color: DARK,
-    fontSize: 17,
+    fontSize: 37,
+    lineHeight: 40,
+    fontWeight: '300',
+  },
+
+  heading: {
+    flex: 1,
+    color: DARK,
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: -0.5,
+  },
+
+  addButton: {
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  addIcon: {
+    color: DARK,
+    fontSize: 32,
+    fontWeight: '300',
+  },
+
+  cancelHeaderButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+
+  cancelHeaderText: {
+    color: RED,
+    fontSize: 12,
     fontWeight: '800',
   },
-  muted: {
+
+  /* FILTERS */
+  filterScroll: {
+    flexGrow: 0,
+    maxHeight: 53,
+    marginTop: 9,
+    marginBottom: 11,
+  },
+
+  filterContent: {
+    alignItems: 'center',
+    gap: 8,
+    paddingRight: 5,
+  },
+
+  filterChip: {
+    minHeight: 39,
+    borderRadius: 22,
+    paddingHorizontal: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+  },
+
+  filterChipActive: {
+    backgroundColor: '#FCECEF',
+    borderColor: RED,
+  },
+
+  filterText: {
+    color: DARK,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+
+  filterTextActive: {
+    color: RED,
+    fontWeight: '900',
+  },
+
+  /* SEARCH */
+  searchBar: {
+    height: 46,
+    backgroundColor: '#EFF0F2',
+    borderRadius: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    marginTop: 3,
+    marginBottom: 16,
+  },
+
+  searchIcon: {
+    color: DARK,
+    fontSize: 26,
+    marginRight: 9,
+  },
+
+  searchInput: {
+    flex: 1,
+    color: DARK,
+    fontSize: 12,
+    paddingVertical: 0,
+    outlineStyle: 'none',
+  } as any,
+
+  clearSearch: {
+    color: MUTED,
+    fontSize: 23,
+    paddingHorizontal: 4,
+  },
+
+  /* CREW LIST */
+  list: {
+    flex: 1,
+  },
+
+  listContent: {
+    paddingTop: 2,
+    paddingBottom: 20,
+  },
+
+  crewRow: {
+    minHeight: 94,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F1F2',
+    paddingVertical: 12,
+  },
+
+  photoPlaceholder: {
+    width: 58,
+    height: 58,
+    borderRadius: 30,
+    backgroundColor: '#ECEDEF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E3E5E7',
+  },
+
+  photoInitial: {
+    color: '#737A82',
+    fontSize: 21,
+    fontWeight: '800',
+  },
+
+  crewInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+
+  crewName: {
+    color: DARK,
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: -0.3,
+  },
+
+  crewMeta: {
     color: MUTED,
     fontSize: 11,
-    lineHeight: 17,
-    marginTop: 3,
+    marginTop: 5,
   },
-  card: {
+
+  dutyStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+
+  dutyDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: GREEN,
+  },
+
+  offDutyDot: {
+    backgroundColor: '#AEB3B8',
+  },
+
+  dutyText: {
+    color: DARK,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+
+  chevron: {
+    color: '#515960',
+    fontSize: 25,
+    marginLeft: 1,
+  },
+
+  pressed: {
+    opacity: 0.65,
+  },
+
+  emptyState: {
+    minHeight: 200,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+
+  emptyTitle: {
+    color: DARK,
+    fontSize: 15,
+    fontWeight: '900',
+  },
+
+  /* ASSIGNMENT FORM */
+  formContent: {
+    paddingTop: 14,
+    paddingBottom: 135,
+  },
+
+  formIntroTitle: {
+    color: DARK,
+    fontSize: 22,
+    fontWeight: '900',
+  },
+
+  formIntro: {
+    color: MUTED,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 6,
+    marginBottom: 17,
+  },
+
+  formCard: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: BORDER,
-    borderRadius: 15,
+    borderRadius: 12,
     padding: 14,
-    marginBottom: 17,
   },
+
+  fieldLabel: {
+    color: DARK,
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.7,
+    marginTop: 13,
+    marginBottom: 8,
+  },
+
+  selectedHandlerBox: {
+    minHeight: 61,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#DDE0E4',
+    borderRadius: 9,
+    padding: 10,
+    backgroundColor: '#FFFFFF',
+  },
+
+  selectedHandlerBoxOpen: {
+    borderColor: RED,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+  },
+
+  handlerPlaceholder: {
+    color: '#9299A0',
+    fontSize: 12,
+  },
+
+  pickerChevron: {
+    color: DARK,
+    fontSize: 20,
+    paddingHorizontal: 5,
+  },
+
+  handlerPicker: {
+    borderWidth: 1,
+    borderTopWidth: 0,
+    borderColor: RED,
+    borderBottomLeftRadius: 9,
+    borderBottomRightRadius: 9,
+    padding: 9,
+    marginBottom: 10,
+    backgroundColor: '#FFFFFF',
+  },
+
+  pickerSearch: {
+    height: 40,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 7,
+    paddingHorizontal: 10,
+    color: DARK,
+    fontSize: 11,
+    outlineStyle: 'none',
+  } as any,
+
+  handlerPickerList: {
+    maxHeight: 220,
+    marginTop: 8,
+  },
+
+  pickerEmpty: {
+    color: MUTED,
+    fontSize: 11,
+    padding: 12,
+    textAlign: 'center',
+  },
+
+  shiftRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+
+  shiftField: {
+    flex: 1,
+    minWidth: 0,
+  },
+
   handlerOption: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
     borderColor: BORDER,
-    borderRadius: 11,
-    padding: 10,
+    borderRadius: 9,
+    padding: 9,
     marginBottom: 8,
   },
+
   selectedOption: {
     borderColor: RED,
-    backgroundColor: '#FFF1F3',
+    backgroundColor: '#FFF3F5',
   },
-  avatar: {
-    width: 39,
-    height: 39,
+
+  avatarSmall: {
+    width: 37,
+    height: 37,
     borderRadius: 20,
-    backgroundColor: '#F5E5E8',
+    backgroundColor: '#F1E6E8',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarText: {
+
+  avatarInitial: {
     color: RED,
-    fontWeight: '800',
     fontSize: 15,
+    fontWeight: '900',
   },
+
   handlerInfo: {
     flex: 1,
     marginLeft: 10,
   },
+
   handlerName: {
     color: DARK,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '800',
   },
+
   check: {
     color: RED,
     fontSize: 19,
-    fontWeight: '800',
+    fontWeight: '900',
   },
-  fieldLabel: {
-    color: DARK,
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.6,
-    marginTop: 5,
-    marginBottom: 6,
+
+  helperText: {
+    color: MUTED,
+    fontSize: 10,
+    lineHeight: 16,
+    marginTop: 4,
   },
+
+  fieldDivider: {
+    height: 1,
+    backgroundColor: BORDER,
+    marginVertical: 17,
+  },
+
   input: {
+    height: 45,
     borderWidth: 1,
-    borderColor: '#D5D5D5',
-    borderRadius: 10,
-    padding: 12,
+    borderColor: '#DDE0E4',
+    borderRadius: 8,
+    paddingHorizontal: 12,
     color: DARK,
     backgroundColor: '#FFFFFF',
-    fontSize: 14,
-    marginBottom: 14,
-  },
+    fontSize: 13,
+    marginBottom: 8,
+    outlineStyle: 'none',
+    minWidth: 0,
+  } as any,
+
   activityOption: {
     borderWidth: 1,
     borderColor: BORDER,
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 8,
+    borderRadius: 8,
+    padding: 11,
+    marginBottom: 7,
   },
+
   activityText: {
     color: DARK,
-    fontSize: 12,
+    fontSize: 11,
   },
+
   selectedActivityText: {
     color: RED,
-    fontWeight: '700',
+    fontWeight: '800',
   },
+
   previewCard: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: BORDER,
-    borderRadius: 14,
-    padding: 15,
-    marginBottom: 15,
+    borderRadius: 11,
+    padding: 14,
+    marginTop: 13,
   },
+
   previewTitle: {
     color: DARK,
-    fontWeight: '800',
-    fontSize: 15,
-    marginBottom: 8,
+    fontWeight: '900',
+    fontSize: 13,
+    marginBottom: 6,
   },
+
   previewText: {
     color: MUTED,
-    fontSize: 12,
+    fontSize: 11,
     marginTop: 5,
   },
-  saveButton: {
-    minHeight: 52,
-    borderRadius: 12,
+
+  primaryButton: {
+    minHeight: 47,
+    borderRadius: 9,
     backgroundColor: RED,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 10,
+    marginTop: 15,
   },
-  saveButtonText: {
+
+  primaryButtonText: {
     color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '800',
+    fontSize: 12,
+    fontWeight: '900',
   },
+
   disabledButton: {
-    opacity: 0.5,
+    opacity: 0.55,
   },
+
   secondaryButton: {
     padding: 12,
     alignItems: 'center',
-    marginBottom: 15,
   },
+
   secondaryButtonText: {
     color: MUTED,
     fontWeight: '700',
+    fontSize: 12,
   },
+
   errorText: {
-    color: '#B91C1C',
+    color: '#B42318',
     fontSize: 12,
     marginVertical: 10,
   },
+
+  /* SAVED ASSIGNMENTS */
   savedHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 15,
+    marginTop: 25,
     marginBottom: 12,
   },
-  countBadge: {
-    minWidth: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: '#F5E5E8',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 8,
+
+  sectionTitle: {
+    color: DARK,
+    fontSize: 15,
+    fontWeight: '900',
   },
+
   countText: {
     color: RED,
-    fontWeight: '800',
+    fontWeight: '900',
+    fontSize: 12,
   },
+
+  emptyBox: {
+    padding: 15,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 10,
+  },
+
   assignmentCard: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: BORDER,
-    borderRadius: 15,
-    padding: 15,
-    marginBottom: 11,
+    borderRadius: 11,
+    padding: 14,
+    marginBottom: 10,
   },
+
   assignmentTop: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+
   flightTitle: {
     color: DARK,
-    fontSize: 22,
-    fontWeight: '800',
+    fontSize: 20,
+    fontWeight: '900',
   },
-  statusBadge: {
-    backgroundColor: '#E8F5EC',
+
+  assignmentStatus: {
+    backgroundColor: '#E7F4E9',
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: 12,
+    borderRadius: 15,
   },
-  cancelledBadge: {
+
+  cancelledStatus: {
     backgroundColor: '#FCE8E8',
   },
-  statusText: {
+
+  assignmentStatusText: {
     color: DARK,
     fontSize: 10,
     fontWeight: '800',
   },
-  cardDivider: {
-    height: 1,
-    backgroundColor: BORDER,
-    marginVertical: 12,
-  },
+
   assignmentName: {
     color: DARK,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '800',
-  },
-  assignmentDetail: {
-    color: MUTED,
-    fontSize: 11,
-    marginTop: 4,
-  },
-  assignmentActivity: {
-    color: RED,
-    fontSize: 12,
-    fontWeight: '700',
     marginTop: 10,
   },
-  ownerText: {
-    color: MUTED,
-    fontSize: 10,
-    marginTop: 8,
+
+  assignmentActivity: {
+    color: RED,
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 9,
   },
+
   actionRow: {
     flexDirection: 'row',
-    gap: 10,
-    marginTop: 14,
+    gap: 9,
+    marginTop: 13,
   },
+
   editButton: {
     flex: 1,
     borderWidth: 1,
     borderColor: RED,
-    borderRadius: 9,
-    padding: 10,
+    borderRadius: 8,
+    padding: 9,
     alignItems: 'center',
   },
+
   editButtonText: {
     color: RED,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '800',
   },
+
   cancelButton: {
     flex: 1,
     backgroundColor: '#FCE8E8',
-    borderRadius: 9,
-    padding: 10,
+    borderRadius: 8,
+    padding: 9,
     alignItems: 'center',
   },
+
   cancelButtonText: {
     color: '#B42318',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  footer: {
-    color: MUTED,
-    textAlign: 'center',
     fontSize: 11,
-    marginTop: 25,
+    fontWeight: '800',
   },
 });

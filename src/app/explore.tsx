@@ -1,3 +1,4 @@
+
 import { auth, db } from '@/lib/firebase';
 import {
   collection,
@@ -11,10 +12,12 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 
@@ -27,28 +30,20 @@ type Assignment = {
   status?: string;
 };
 
-type FilterType =
-  | 'All'
-  | 'Today'
-  | 'Upcoming'
-  | 'In Progress'
-  | 'Completed';
+type FilterType = 'Today' | 'Upcoming' | 'In Progress' | 'Completed';
 
 const RED = '#C8102E';
-const DARK_RED = '#A20D25';
 const CHARCOAL = '#252525';
-const BACKGROUND = '#F4F3F3';
+const BACKGROUND = '#F5F5F7';
 const WHITE = '#FFFFFF';
 const MUTED = '#777777';
-const BORDER = '#E7E7E9';
+const BORDER = '#E9E9E9';
 const GREEN = '#16805C';
-const PALE_RED = '#FCEBED';
 
 function getLocalDateKey(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
-
   return `${year}-${month}-${day}`;
 }
 
@@ -56,8 +51,6 @@ function parseAssignmentDate(dateValue?: string) {
   if (!dateValue) return null;
 
   const value = dateValue.trim();
-
-  // Supports YYYY-MM-DD
   const isoMatch = value.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
 
   if (isoMatch) {
@@ -70,7 +63,6 @@ function parseAssignmentDate(dateValue?: string) {
     return Number.isNaN(date.getTime()) ? null : date;
   }
 
-  // Supports DD/MM/YYYY or DD-MM-YYYY
   const localMatch = value.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
 
   if (localMatch) {
@@ -84,7 +76,6 @@ function parseAssignmentDate(dateValue?: string) {
   }
 
   const parsed = new Date(value);
-
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
@@ -93,10 +84,7 @@ function getAssignmentDateTime(assignment: Assignment) {
 
   if (!date || !assignment.shiftTime) return null;
 
-  const time = assignment.shiftTime.trim();
-
-  // Supports 10:30 AM, 10:30PM and 14:30
-  const timeMatch = time.match(
+  const timeMatch = assignment.shiftTime.trim().match(
     /^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i
   );
 
@@ -110,13 +98,11 @@ function getAssignmentDateTime(assignment: Assignment) {
 
   if (period) {
     if (hours < 1 || hours > 12) return null;
-
     if (period === 'AM' && hours === 12) hours = 0;
     if (period === 'PM' && hours !== 12) hours += 12;
   }
 
   date.setHours(hours, minutes, 0, 0);
-
   return date;
 }
 
@@ -127,19 +113,34 @@ function isOverdue(assignment: Assignment, now: Date) {
     return false;
   }
 
-  const scheduledDateTime = getAssignmentDateTime(assignment);
+  const scheduled = getAssignmentDateTime(assignment);
 
-  if (!scheduledDateTime) return false;
+  return scheduled ? scheduled.getTime() < now.getTime() : false;
+}
 
-  return scheduledDateTime.getTime() < now.getTime();
+function formatTaskDate(dateValue?: string) {
+  const date = parseAssignmentDate(dateValue);
+
+  if (!date) return dateValue || 'Date not set';
+
+  return date.toLocaleDateString([], {
+    day: 'numeric',
+    month: 'short',
+  });
 }
 
 function getStatusColor(status: string, overdue: boolean) {
   if (overdue) return '#B42318';
   if (status === 'Completed') return GREEN;
   if (status === 'In Progress') return '#946200';
-
   return MUTED;
+}
+
+function getStatusBackground(status: string, overdue: boolean) {
+  if (overdue) return '#FCEBED';
+  if (status === 'Completed') return '#E8F5EF';
+  if (status === 'In Progress') return '#FFF3D6';
+  return '#F0F0F0';
 }
 
 export default function MyTasksScreen() {
@@ -147,9 +148,10 @@ export default function MyTasksScreen() {
   const [loading, setLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [selectedFilter, setSelectedFilter] =
-    useState<FilterType>('All');
+    useState<FilterType>('Today');
   const [currentTime, setCurrentTime] = useState(new Date());
   const [loadError, setLoadError] = useState('');
+  const [searchText, setSearchText] = useState('');
 
   const today = getLocalDateKey(currentTime);
 
@@ -195,7 +197,6 @@ export default function MyTasksScreen() {
         tasks.sort((a, b) => {
           const dateA = getAssignmentDateTime(a)?.getTime() ?? 0;
           const dateB = getAssignmentDateTime(b)?.getTime() ?? 0;
-
           return dateA - dateB;
         });
 
@@ -248,141 +249,89 @@ export default function MyTasksScreen() {
     (task) => task.status !== 'Cancelled'
   );
 
-  const overdueCount = activeAssignments.filter((task) =>
-    isOverdue(task, currentTime)
-  ).length;
-
-  const inProgressCount = activeAssignments.filter(
-    (task) => task.status === 'In Progress'
-  ).length;
-
-  const completedCount = activeAssignments.filter(
-    (task) => task.status === 'Completed'
-  ).length;
-
-  const assignedCount = activeAssignments.filter(
-    (task) => task.status === 'Assigned'
-  ).length;
-
-  const todayCount = activeAssignments.filter((task) => {
-    const date = parseAssignmentDate(task.shiftDate);
-    return date && getLocalDateKey(date) === today;
-  }).length;
-
   const filteredAssignments = useMemo(() => {
+    const search = searchText.trim().toLowerCase();
+
     return activeAssignments.filter((task) => {
       const status = task.status ?? 'Assigned';
       const date = parseAssignmentDate(task.shiftDate);
       const taskDate = date ? getLocalDateKey(date) : '';
 
+      let matchesFilter = false;
+
       switch (selectedFilter) {
         case 'Today':
-          return taskDate === today;
+          matchesFilter = taskDate === today;
+          break;
 
         case 'Upcoming':
-          return !!date && taskDate > today && status !== 'Completed';
+          matchesFilter =
+            !!date && taskDate > today && status !== 'Completed';
+          break;
 
         case 'In Progress':
-          return status === 'In Progress';
+          matchesFilter = status === 'In Progress';
+          break;
 
         case 'Completed':
-          return status === 'Completed';
-
-        case 'All':
-        default:
-          return true;
+          matchesFilter = status === 'Completed';
+          break;
       }
+
+      const matchesSearch =
+        !search ||
+        (task.flightNumber ?? '').toLowerCase().includes(search) ||
+        (task.activity ?? '').toLowerCase().includes(search) ||
+        (task.status ?? '').toLowerCase().includes(search);
+
+      return matchesFilter && matchesSearch;
     });
-  }, [activeAssignments, selectedFilter, today]);
+  }, [activeAssignments, selectedFilter, today, searchText]);
 
   const filters: FilterType[] = [
-    'All',
     'Today',
     'Upcoming',
     'In Progress',
     'Completed',
   ];
 
+  const sectionTitle =
+    selectedFilter === 'Today'
+      ? 'TODAY'
+      : selectedFilter === 'Upcoming'
+        ? 'UPCOMING'
+        : selectedFilter.toUpperCase();
+
   return (
     <View style={styles.screen}>
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
-        {/* Header */}
+        {/* Page header */}
         <View style={styles.header}>
-          <Text style={styles.eyebrow}>AEROSYNC · CREW WORKSPACE</Text>
+          <View style={styles.headerTitleRow}>
+            <View style={styles.headerTitleGroup}>
+              <Text style={styles.pageTitle}>My Tasks</Text>
+              <Text style={styles.headerDate}>
+                {currentTime.toLocaleDateString([], {
+                  weekday: 'short',
+                  day: 'numeric',
+                  month: 'short',
+                })}
+              </Text>
+            </View>
 
-          <Text style={styles.title}>My Tasks</Text>
-
-          <Text style={styles.subtitle}>
-            Manage your assigned ground activities and monitor your progress.
-          </Text>
-        </View>
-
-        {/* Task summary */}
-        <View style={styles.summaryCard}>
-          <View style={styles.summaryTop}>
-            <Text style={styles.summaryHeading}>Task Overview</Text>
-            <Text style={styles.summaryDate}>
-              {currentTime.toLocaleDateString([], {
-                day: 'numeric',
-                month: 'short',
-                year: 'numeric',
-              })}
-            </Text>
-          </View>
-
-          <View style={styles.summary}>
-            <View style={styles.summaryItem}>
-              <Text style={styles.summaryNumber}>
+            <View style={styles.taskCountBadge}>
+              <Text style={styles.taskCountBadgeText}>
                 {activeAssignments.length}
               </Text>
-              <Text style={styles.summaryLabel}>Total</Text>
             </View>
-
-            <View style={styles.summaryDivider} />
-
-            <View style={styles.summaryItem}>
-              <Text style={styles.summaryNumber}>
-                {inProgressCount}
-              </Text>
-              <Text style={styles.summaryLabel}>In progress</Text>
-            </View>
-
-            <View style={styles.summaryDivider} />
-
-            <View style={styles.summaryItem}>
-              <Text style={[styles.summaryNumber, { color: GREEN }]}>
-                {completedCount}
-              </Text>
-              <Text style={styles.summaryLabel}>Completed</Text>
-            </View>
-          </View>
-
-          <View style={styles.summaryFooter}>
-            <Text style={styles.summaryFooterText}>
-              {assignedCount} awaiting start
-            </Text>
-
-            {overdueCount > 0 && (
-              <Text style={styles.overdueSummary}>
-                {overdueCount} overdue
-              </Text>
-            )}
           </View>
         </View>
 
-        {/* Filters */}
-        <View style={styles.sectionHeader}>
-          <View>
-            <Text style={styles.sectionTitle}>Your Assignments</Text>
-            <Text style={styles.sectionSubtitle}>
-              {todayCount} scheduled for today
-            </Text>
-          </View>
-        </View>
-
+        {/* Filter tabs */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -413,187 +362,181 @@ export default function MyTasksScreen() {
           })}
         </ScrollView>
 
-        {/* Assignment list */}
+        {/* Search */}
+        <View style={styles.searchBox}>
+          <Text style={styles.searchIcon}>⌕</Text>
+
+          <TextInput
+            value={searchText}
+            onChangeText={setSearchText}
+            placeholder="Search task or flight..."
+            placeholderTextColor="#999999"
+            style={styles.searchInput}
+            returnKeyType="search"
+          />
+
+          {searchText.length > 0 && (
+            <Pressable onPress={() => setSearchText('')}>
+              <Text style={styles.clearSearch}>✕</Text>
+            </Pressable>
+          )}
+        </View>
+
+        {/* Assignment heading */}
+        <View style={styles.listHeading}>
+          <Text style={styles.listTitle}>{sectionTitle}</Text>
+          <Text style={styles.listCount}>
+            {filteredAssignments.length}
+          </Text>
+        </View>
+
+        {/* Assignments */}
         {loading ? (
-          <View style={styles.messageCard}>
+          <View style={styles.messageContainer}>
             <ActivityIndicator size="large" color={RED} />
             <Text style={styles.messageText}>
               Loading your assignments...
             </Text>
           </View>
         ) : loadError ? (
-          <View style={styles.messageCard}>
+          <View style={styles.messageContainer}>
             <Text style={styles.errorText}>{loadError}</Text>
           </View>
         ) : filteredAssignments.length === 0 ? (
-          <View style={styles.emptyCard}>
-            <View style={styles.emptyIcon}>
-              <Text style={styles.emptyIconText}>✓</Text>
-            </View>
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyIcon}>✓</Text>
 
             <Text style={styles.emptyTitle}>
-              {selectedFilter === 'Today'
-                ? 'No tasks scheduled today'
-                : selectedFilter === 'Upcoming'
-                  ? 'No upcoming assignments'
-                  : selectedFilter === 'In Progress'
-                    ? 'No tasks in progress'
-                    : selectedFilter === 'Completed'
-                      ? 'No completed tasks yet'
-                      : 'No assignments yet'}
+              {searchText
+                ? 'No matching tasks'
+                : selectedFilter === 'Today'
+                  ? 'No tasks scheduled today'
+                  : selectedFilter === 'Upcoming'
+                    ? 'No upcoming assignments'
+                    : selectedFilter === 'In Progress'
+                      ? 'No tasks in progress'
+                      : 'No completed tasks yet'}
             </Text>
 
             <Text style={styles.emptyText}>
-              {selectedFilter === 'All'
-                ? 'Assignments from your supervisor will appear here.'
-                : 'There are currently no assignments in this category.'}
+              {searchText
+                ? 'Try another flight number or activity.'
+                : 'Assignments from your supervisor will appear here.'}
             </Text>
           </View>
         ) : (
-          filteredAssignments.map((assignment) => {
-            const status = assignment.status ?? 'Assigned';
-            const isCompleted = status === 'Completed';
-            const isInProgress = status === 'In Progress';
-            const isUpdating = updatingId === assignment.id;
-            const overdue = isOverdue(assignment, currentTime);
+          <View style={styles.assignmentList}>
+            {filteredAssignments.map((assignment) => {
+              const status = assignment.status ?? 'Assigned';
+              const isCompleted = status === 'Completed';
+              const isInProgress = status === 'In Progress';
+              const isUpdating = updatingId === assignment.id;
+              const overdue = isOverdue(assignment, currentTime);
 
-            return (
-              <View key={assignment.id} style={styles.taskCard}>
-                {/* Card header */}
-                <View style={styles.cardTop}>
-                  <View style={styles.flightBlock}>
-                    <Text style={styles.flightLabel}>FLIGHT</Text>
-                    <Text style={styles.flightNumber}>
-                      {assignment.flightNumber || 'Not specified'}
-                    </Text>
-                  </View>
+              const statusColor = getStatusColor(status, overdue);
+              const statusBackground = getStatusBackground(
+                status,
+                overdue
+              );
 
-                  <View
-                    style={[
-                      styles.statusBadge,
-                      isInProgress && styles.progressBadge,
-                      isCompleted && styles.completedBadge,
-                      overdue && styles.overdueBadge,
-                    ]}
-                  >
-                    <View
-                      style={[
-                        styles.statusDot,
-                        { backgroundColor: getStatusColor(status, overdue) },
-                      ]}
-                    />
+              return (
+                <View key={assignment.id} style={styles.taskRow}>
+                  <View style={styles.taskMain}>
+                    <View style={styles.taskTopLine}>
+                      <Text
+                        style={styles.flightNumber}
+                        numberOfLines={1}
+                      >
+                        {assignment.flightNumber || 'General task'}
+                      </Text>
 
-                    <Text
-                      style={[
-                        styles.statusText,
-                        { color: getStatusColor(status, overdue) },
-                      ]}
-                    >
-                      {overdue ? 'OVERDUE' : status.toUpperCase()}
-                    </Text>
-                  </View>
-                </View>
+                      <Text style={styles.taskTime}>
+                        {assignment.shiftTime || '—'}
+                      </Text>
 
-                {/* Activity */}
-                <Text style={styles.activity}>
-                  {assignment.activity || 'General handling'}
-                </Text>
+                      <View
+                        style={[
+                          styles.statusBadge,
+                          { backgroundColor: statusBackground },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.statusText,
+                            { color: statusColor },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {overdue ? 'Overdue' : status}
+                        </Text>
+                      </View>
+                    </View>
 
-                {/* Schedule */}
-                <View style={styles.detailsContainer}>
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>SCHEDULED DATE</Text>
-                    <Text style={styles.detailValue}>
-                      {assignment.shiftDate || 'Not specified'}
-                    </Text>
-                  </View>
+                    <View style={styles.taskBottomLine}>
+                      <Text
+                        style={styles.activity}
+                        numberOfLines={1}
+                      >
+                        {assignment.activity || 'General handling'}
+                      </Text>
 
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>SCHEDULED TIME</Text>
-                    <Text style={styles.detailValue}>
-                      {assignment.shiftTime || 'Not specified'}
-                    </Text>
-                  </View>
-                </View>
+                      <Text style={styles.taskDate}>
+                        {formatTaskDate(assignment.shiftDate)}
+                      </Text>
+                    </View>
 
-                {/* Overdue explanation */}
-                {overdue && (
-                  <View style={styles.overdueNotice}>
-                    <Text style={styles.overdueNoticeText}>
-                      This task is past its scheduled time and has not been
-                      completed.
-                    </Text>
-                  </View>
-                )}
-
-                {/* Task action */}
-                {!isCompleted && (
-                  <Pressable
-                    accessibilityRole="button"
-                    disabled={isUpdating}
-                    onPress={() => updateTask(assignment)}
-                    style={({ pressed }) => [
-                      styles.actionButton,
-                      isInProgress && styles.completeButton,
-                      pressed && styles.pressed,
-                      isUpdating && styles.disabledButton,
-                    ]}
-                  >
-                    {isUpdating ? (
-                      <ActivityIndicator color={WHITE} />
-                    ) : (
-                      <Text style={styles.actionButtonText}>
-                        {status === 'Assigned'
-                          ? 'START TASK'
-                          : 'MARK AS COMPLETED'}
+                    {overdue && (
+                      <Text style={styles.overdueText}>
+                        Scheduled time has passed
                       </Text>
                     )}
-                  </Pressable>
-                )}
 
-                {isCompleted && (
-                  <View style={styles.completedMessage}>
-                    <Text style={styles.completedMessageText}>
-                      ✓ Task completed
-                    </Text>
+                    {!isCompleted && (
+                      <Pressable
+                        accessibilityRole="button"
+                        disabled={isUpdating}
+                        onPress={() => updateTask(assignment)}
+                        style={({ pressed }) => [
+                          styles.taskAction,
+                          isInProgress && styles.completeAction,
+                          pressed && styles.pressed,
+                          isUpdating && styles.disabledButton,
+                        ]}
+                      >
+                        {isUpdating ? (
+                          <ActivityIndicator
+                            size="small"
+                            color={RED}
+                          />
+                        ) : (
+                          <Text
+                            style={[
+                              styles.taskActionText,
+                              isInProgress &&
+                                styles.completeActionText,
+                            ]}
+                          >
+                            {status === 'Assigned'
+                              ? 'START TASK'
+                              : 'MARK AS COMPLETED'}
+                          </Text>
+                        )}
+                      </Pressable>
+                    )}
+
+                    {isCompleted && (
+                      <Text style={styles.completedText}>
+                        ✓ Task completed
+                      </Text>
+                    )}
                   </View>
-                )}
-              </View>
-            );
-          })
+
+                  <Text style={styles.chevron}>›</Text>
+                </View>
+              );
+            })}
+          </View>
         )}
-
-        <View style={styles.footerCard}>
-          <Text style={styles.footerTitle}>Task status guide</Text>
-
-          <View style={styles.guideRow}>
-            <View style={[styles.guideDot, { backgroundColor: MUTED }]} />
-            <Text style={styles.guideText}>
-              Assigned — waiting to be started
-            </Text>
-          </View>
-
-          <View style={styles.guideRow}>
-            <View style={[styles.guideDot, { backgroundColor: '#946200' }]} />
-            <Text style={styles.guideText}>
-              In Progress — work has started
-            </Text>
-          </View>
-
-          <View style={styles.guideRow}>
-            <View style={[styles.guideDot, { backgroundColor: GREEN }]} />
-            <Text style={styles.guideText}>
-              Completed — work has been finished
-            </Text>
-          </View>
-
-          <View style={styles.guideRow}>
-            <View style={[styles.guideDot, { backgroundColor: '#B42318' }]} />
-            <Text style={styles.guideText}>
-              Overdue — scheduled time has passed
-            </Text>
-          </View>
-        </View>
 
         <Text style={styles.footer}>
           AEROSYNC · GROUND OPERATIONS
@@ -610,151 +553,84 @@ const styles = StyleSheet.create({
   },
 
   content: {
-    padding: 20,
-    paddingBottom: 40,
+    paddingHorizontal: 17,
+    paddingTop: Platform.OS === 'ios' ? 58 : 22,
+    paddingBottom: 30,
     width: '100%',
-    maxWidth: 900,
+    maxWidth: 650,
     alignSelf: 'center',
   },
 
   header: {
-    backgroundColor: CHARCOAL,
-    borderRadius: 19,
-    padding: 22,
-    marginBottom: 17,
+    paddingTop: 5,
+    paddingBottom: 17,
   },
 
-  eyebrow: {
-    color: '#F3B9C2',
-    fontSize: 10,
-    fontWeight: '900',
-    letterSpacing: 1.2,
-    marginBottom: 10,
-  },
-
-  title: {
-    color: WHITE,
-    fontSize: 29,
-    fontWeight: '900',
-  },
-
-  subtitle: {
-    color: '#E2E2E2',
-    fontSize: 13,
-    lineHeight: 20,
-    marginTop: 8,
-  },
-
-  summaryCard: {
-    backgroundColor: WHITE,
-    borderRadius: 17,
-    padding: 17,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: BORDER,
-  },
-
-  summaryTop: {
+  headerTitleRow: {
+    minHeight: 42,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 17,
   },
 
-  summaryHeading: {
-    color: CHARCOAL,
-    fontSize: 15,
-    fontWeight: '900',
-  },
-
-  summaryDate: {
-    color: MUTED,
-    fontSize: 11,
-  },
-
-  summary: {
+  headerTitleGroup: {
     flexDirection: 'row',
-    alignItems: 'center',
-  },
-
-  summaryItem: {
+    alignItems: 'baseline',
+    flexWrap: 'wrap',
+    gap: 10,
     flex: 1,
-    alignItems: 'center',
-    gap: 4,
+    minWidth: 0,
   },
 
-  summaryNumber: {
+  pageTitle: {
     color: CHARCOAL,
     fontSize: 25,
     fontWeight: '900',
+    letterSpacing: -0.6,
   },
 
-  summaryLabel: {
-    color: MUTED,
-    fontSize: 11,
-    textAlign: 'center',
-  },
-
-  summaryDivider: {
-    width: 1,
-    height: 35,
-    backgroundColor: BORDER,
-  },
-
-  summaryFooter: {
-    borderTopWidth: 1,
-    borderTopColor: BORDER,
-    marginTop: 15,
-    paddingTop: 12,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-
-  summaryFooterText: {
+  headerDate: {
     color: MUTED,
     fontSize: 11,
     fontWeight: '600',
   },
 
-  overdueSummary: {
-    color: '#B42318',
-    fontSize: 11,
-    fontWeight: '800',
+  taskCountBadge: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: RED,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 10,
   },
 
-  sectionHeader: {
-    marginBottom: 13,
-  },
-
-  sectionTitle: {
-    color: CHARCOAL,
-    fontSize: 20,
+  taskCountBadgeText: {
+    color: WHITE,
+    fontSize: 13,
     fontWeight: '900',
   },
 
-  sectionSubtitle: {
-    color: MUTED,
-    fontSize: 12,
-    marginTop: 4,
-  },
-
   filterContainer: {
-    gap: 8,
-    paddingBottom: 17,
+    flexGrow: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
+    marginBottom: 15,
   },
 
   filterButton: {
-    backgroundColor: WHITE,
-    borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 20,
-    paddingHorizontal: 15,
-    paddingVertical: 10,
+    paddingHorizontal: 9,
+    paddingVertical: 12,
+    borderBottomWidth: 3,
+    borderBottomColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   selectedFilterButton: {
-    backgroundColor: RED,
-    borderColor: RED,
+    borderBottomColor: RED,
   },
 
   filterText: {
@@ -764,69 +640,113 @@ const styles = StyleSheet.create({
   },
 
   selectedFilterText: {
-    color: WHITE,
+    color: RED,
+    fontWeight: '900',
   },
 
-  taskCard: {
-    backgroundColor: WHITE,
+  searchBox: {
+    backgroundColor: '#ECECEF',
     borderRadius: 17,
-    padding: 17,
-    marginBottom: 13,
-    borderWidth: 1,
-    borderColor: BORDER,
+    minHeight: 45,
+    paddingHorizontal: 13,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 19,
   },
 
-  cardTop: {
+  searchIcon: {
+    color: CHARCOAL,
+    fontSize: 22,
+    marginRight: 9,
+  },
+
+  searchInput: {
+    flex: 1,
+    color: CHARCOAL,
+    fontSize: 12,
+    paddingVertical: 9,
+  },
+
+  clearSearch: {
+    color: MUTED,
+    fontSize: 14,
+    paddingHorizontal: 5,
+  },
+
+  listHeading: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 10,
+    marginHorizontal: 2,
+    marginBottom: 9,
   },
 
-  flightBlock: {
-    flex: 1,
-  },
-
-  flightLabel: {
+  listTitle: {
     color: MUTED,
-    fontSize: 9,
+    fontSize: 10,
     fontWeight: '900',
-    letterSpacing: 1,
+    letterSpacing: 1.1,
+  },
+
+  listCount: {
+    color: MUTED,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+
+  assignmentList: {
+    backgroundColor: WHITE,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: BORDER,
+    overflow: 'hidden',
+  },
+
+  taskRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 13,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEEEEE',
+    gap: 8,
+  },
+
+  taskMain: {
+    flex: 1,
+    minWidth: 0,
+  },
+
+  taskTopLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
   },
 
   flightNumber: {
     color: CHARCOAL,
-    fontSize: 23,
+    fontSize: 14,
     fontWeight: '900',
-    marginTop: 4,
+    flex: 1,
+    minWidth: 0,
+  },
+
+  taskTime: {
+    color: CHARCOAL,
+    fontSize: 12,
+    fontWeight: '900',
+    minWidth: 42,
+    textAlign: 'right',
   },
 
   statusBadge: {
-    flexDirection: 'row',
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    borderRadius: 18,
+    minWidth: 67,
+    maxWidth: 105,
     alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#F0F0F0',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-
-  progressBadge: {
-    backgroundColor: '#FFF3D6',
-  },
-
-  completedBadge: {
-    backgroundColor: '#E8F5EF',
-  },
-
-  overdueBadge: {
-    backgroundColor: '#FCEBED',
-  },
-
-  statusDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
+    justifyContent: 'center',
   },
 
   statusText: {
@@ -834,145 +754,87 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
 
-  activity: {
-    color: CHARCOAL,
-    fontSize: 16,
-    fontWeight: '800',
-    marginTop: 16,
-    marginBottom: 15,
-  },
-
-  detailsContainer: {
-    backgroundColor: BACKGROUND,
-    borderRadius: 12,
-    padding: 13,
-    gap: 11,
-  },
-
-  detailRow: {
+  taskBottomLine: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
+    marginTop: 6,
   },
 
-  detailLabel: {
+  activity: {
     color: MUTED,
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.5,
+    fontSize: 11,
+    flex: 1,
   },
 
-  detailValue: {
-    color: CHARCOAL,
-    fontSize: 12,
-    fontWeight: '700',
+  taskDate: {
+    color: MUTED,
+    fontSize: 10,
     textAlign: 'right',
   },
 
-  overdueNotice: {
-    backgroundColor: '#FCEBED',
-    borderRadius: 10,
-    padding: 11,
-    marginTop: 12,
-  },
-
-  overdueNoticeText: {
+  overdueText: {
     color: '#B42318',
-    fontSize: 11,
-    lineHeight: 17,
-    fontWeight: '600',
+    fontSize: 9,
+    fontWeight: '700',
+    marginTop: 6,
   },
 
-  actionButton: {
-    backgroundColor: RED,
-    borderRadius: 11,
-    paddingVertical: 14,
+  taskAction: {
+    alignSelf: 'flex-start',
+    marginTop: 9,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+    backgroundColor: '#FFF1F3',
+    minWidth: 90,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 14,
-    minHeight: 46,
   },
 
-  completeButton: {
-    backgroundColor: CHARCOAL,
-  },
-
-  actionButtonText: {
-    color: WHITE,
-    fontSize: 12,
+  taskActionText: {
+    color: RED,
+    fontSize: 9,
     fontWeight: '900',
-    letterSpacing: 0.6,
+    letterSpacing: 0.3,
   },
 
-  completedMessage: {
-    backgroundColor: '#E8F5EF',
-    borderRadius: 10,
-    padding: 12,
-    alignItems: 'center',
-    marginTop: 14,
+  completeAction: {
+    backgroundColor: '#F1F1F1',
   },
 
-  completedMessageText: {
+  completeActionText: {
+    color: CHARCOAL,
+  },
+
+  completedText: {
     color: GREEN,
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: '800',
+    marginTop: 8,
+  },
+
+  chevron: {
+    color: '#888888',
+    fontSize: 25,
+    paddingHorizontal: 2,
   },
 
   pressed: {
-    opacity: 0.75,
+    opacity: 0.65,
   },
 
   disabledButton: {
-    opacity: 0.6,
+    opacity: 0.5,
   },
 
-  emptyCard: {
+  messageContainer: {
     backgroundColor: WHITE,
+    borderRadius: 13,
     padding: 25,
-    borderRadius: 17,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: BORDER,
     gap: 10,
-  },
-
-  emptyIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
-    backgroundColor: PALE_RED,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  emptyIconText: {
-    color: RED,
-    fontSize: 24,
-    fontWeight: '900',
-  },
-
-  emptyTitle: {
-    color: CHARCOAL,
-    fontSize: 16,
-    fontWeight: '900',
-  },
-
-  emptyText: {
-    color: MUTED,
-    textAlign: 'center',
-    lineHeight: 20,
-    fontSize: 12,
-  },
-
-  messageCard: {
-    backgroundColor: WHITE,
-    borderRadius: 16,
-    padding: 25,
-    alignItems: 'center',
-    gap: 12,
-    borderWidth: 1,
-    borderColor: BORDER,
   },
 
   messageText: {
@@ -984,49 +846,42 @@ const styles = StyleSheet.create({
     color: '#B42318',
     fontSize: 12,
     textAlign: 'center',
-    lineHeight: 19,
   },
 
-  footerCard: {
+  emptyContainer: {
     backgroundColor: WHITE,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: BORDER,
-    padding: 17,
-    marginTop: 9,
-    gap: 12,
-  },
-
-  footerTitle: {
-    color: CHARCOAL,
-    fontSize: 13,
-    fontWeight: '900',
-    marginBottom: 2,
-  },
-
-  guideRow: {
-    flexDirection: 'row',
+    borderRadius: 13,
+    padding: 28,
     alignItems: 'center',
-    gap: 9,
+    gap: 8,
   },
 
-  guideDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 5,
+  emptyIcon: {
+    color: GREEN,
+    fontSize: 27,
+    fontWeight: '900',
   },
 
-  guideText: {
+  emptyTitle: {
+    color: CHARCOAL,
+    fontSize: 14,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+
+  emptyText: {
     color: MUTED,
     fontSize: 11,
+    lineHeight: 17,
+    textAlign: 'center',
   },
 
   footer: {
     color: MUTED,
-    fontSize: 9,
+    fontSize: 8,
     fontWeight: '800',
     letterSpacing: 0.8,
     textAlign: 'center',
-    marginTop: 22,
+    marginTop: 20,
   },
 });

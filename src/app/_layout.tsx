@@ -1,5 +1,6 @@
+
 import AppTabs from '@/components/app-tabs';
-import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
+import { DefaultTheme, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
@@ -8,12 +9,15 @@ import {
   ActivityIndicator,
   StyleSheet,
   Text,
-  useColorScheme,
   View,
 } from 'react-native';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import AuthScreen from '@/components/auth-screen';
+import {
+  AeroSyncThemeProvider,
+  useAeroSyncTheme,
+} from '@/context/ThemeContext';
 import { auth, authPersistenceReady, db } from '@/lib/firebase';
 
 SplashScreen.preventAutoHideAsync();
@@ -26,7 +30,15 @@ const isRole = (value: unknown): value is Role =>
   value === 'supervisor';
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
+  return (
+    <AeroSyncThemeProvider>
+      <RootLayoutContent />
+    </AeroSyncThemeProvider>
+  );
+}
+
+function RootLayoutContent() {
+  const { isThemeReady } = useAeroSyncTheme();
 
   const [user, setUser] = useState<User | null>(null);
   const [role, setRole] = useState<Role | null>(null);
@@ -54,8 +66,6 @@ export default function RootLayout() {
       unsubscribeProfile = undefined;
     };
 
-    // Wait until Firebase has established the correct
-    // browser-session persistence before checking authentication.
     authPersistenceReady
       .then(() => {
         if (!active) return;
@@ -226,11 +236,14 @@ export default function RootLayout() {
   }
 
   return (
-    <ThemeProvider
-      value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}
-    >
+    <ThemeProvider value={DefaultTheme}>
       <AnimatedSplashOverlay />
-      {content}
+
+      {isThemeReady ? (
+        content
+      ) : (
+        <View style={styles.themeLoading} />
+      )}
     </ThemeProvider>
   );
 }
@@ -264,5 +277,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     padding: 12,
+  },
+
+  themeLoading: {
+    flex: 1,
+    backgroundColor: '#F4F3F3',
   },
 });

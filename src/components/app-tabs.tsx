@@ -1,4 +1,19 @@
-import { NativeTabs } from 'expo-router/unstable-native-tabs';
+
+import {
+  TabList,
+  TabListProps,
+  Tabs,
+  TabSlot,
+  TabTrigger,
+  TabTriggerSlotProps,
+} from 'expo-router/ui';
+
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
 type Role = 'handler' | 'supervisor';
 
@@ -6,96 +21,236 @@ type AppTabsProps = {
   role: Role;
 };
 
+const RED = '#C8102E';
+const DARK = '#24272B';
+const BORDER = '#E9E9EB';
+
 export default function AppTabs({ role }: AppTabsProps) {
   const isHandler = role === 'handler';
+  const styles = createStyles();
 
   return (
-    <NativeTabs>
-      <NativeTabs.Trigger name="index">
-        <NativeTabs.Trigger.Label>
-          {isHandler ? 'Home' : 'Operations'}
-        </NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon
-          src={require('@/assets/images/tabIcons/home.png')}
-          renderingMode="template"
-        />
-      </NativeTabs.Trigger>
+    <Tabs>
+      <TabSlot style={{ flex: 1 }} />
 
-      {isHandler && (
-        <NativeTabs.Trigger name="explore">
-          <NativeTabs.Trigger.Label>My Tasks</NativeTabs.Trigger.Label>
-          <NativeTabs.Trigger.Icon
-            src={require('@/assets/images/tabIcons/explore.png')}
-            renderingMode="template"
-          />
-        </NativeTabs.Trigger>
-      )}
+      <TabList asChild>
+        <CustomTabList styles={styles}>
+          <TabTrigger name="index" href="/" asChild>
+            <TabButton styles={styles} icon="⌂">
+              {isHandler ? 'Home' : 'Operations'}
+            </TabButton>
+          </TabTrigger>
 
-      {isHandler && (
-        <NativeTabs.Trigger name="scan-qr">
-          <NativeTabs.Trigger.Label>Scan QR</NativeTabs.Trigger.Label>
-          <NativeTabs.Trigger.Icon
-            sf={{
-              default: 'qrcode.viewfinder',
-              selected: 'qrcode.viewfinder',
-            }}
-          />
-        </NativeTabs.Trigger>
-      )}
+          {isHandler ? (
+            <>
+              <TabTrigger name="explore" href="/explore" asChild>
+                <TabButton styles={styles} icon="▣">
+                  My Tasks
+                </TabButton>
+              </TabTrigger>
 
-      {isHandler && (
-        <NativeTabs.Trigger name="incidents">
-          <NativeTabs.Trigger.Label>Incidents</NativeTabs.Trigger.Label>
-          <NativeTabs.Trigger.Icon
-            sf={{
-              default: 'exclamationmark.triangle',
-              selected: 'exclamationmark.triangle',
-            }}
-          />
-        </NativeTabs.Trigger>
-      )}
+              <TabTrigger name="scan-qr" href="/scan-qr" asChild>
+                <TabButton styles={styles} icon="▦">
+                  Scan QR
+                </TabButton>
+              </TabTrigger>
 
-      {!isHandler && (
-        <NativeTabs.Trigger name="baggage">
-          <NativeTabs.Trigger.Label>Baggage</NativeTabs.Trigger.Label>
-          <NativeTabs.Trigger.Icon
-            src={require('@/assets/images/tabIcons/explore.png')}
-            renderingMode="template"
-          />
-        </NativeTabs.Trigger>
-      )}
+              <TabTrigger name="incidents" href="/incidents" asChild>
+                <TabButton styles={styles} icon="⚠">
+                  Incidents
+                </TabButton>
+              </TabTrigger>
 
-      {!isHandler && (
-        <NativeTabs.Trigger name="crew">
-          <NativeTabs.Trigger.Label>Crew</NativeTabs.Trigger.Label>
-          <NativeTabs.Trigger.Icon
-            src={require('@/assets/images/tabIcons/home.png')}
-            renderingMode="template"
-          />
-        </NativeTabs.Trigger>
-      )}
+              <TabTrigger name="account" href="/account" asChild>
+                <TabButton styles={styles} icon="●">
+                  Account
+                </TabButton>
+              </TabTrigger>
+            </>
+          ) : (
+            <>
+              <TabTrigger name="flights" href="/flights" asChild>
+                <TabButton styles={styles} icon="✈">
+                  Flights
+                </TabButton>
+              </TabTrigger>
 
-      {!isHandler && (
-        <NativeTabs.Trigger name="delay-risk">
-          <NativeTabs.Trigger.Label>Delay Risk</NativeTabs.Trigger.Label>
-          <NativeTabs.Trigger.Icon
-            sf={{
-              default: 'chart.bar',
-              selected: 'chart.bar',
-            }}
-          />
-        </NativeTabs.Trigger>
-      )}
+              <TabTrigger name="baggage" href="/baggage" asChild>
+                <TabButton styles={styles} icon="▣">
+                  Baggage
+                </TabButton>
+              </TabTrigger>
 
-      <NativeTabs.Trigger name="account">
-        <NativeTabs.Trigger.Label>Account</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon
-          sf={{
-            default: 'person.crop.circle',
-            selected: 'person.crop.circle',
-          }}
-        />
-      </NativeTabs.Trigger>
-    </NativeTabs>
+              <TabTrigger name="crew" href="/crew" asChild>
+                <TabButton styles={styles} icon="👥">
+                  Crew
+                </TabButton>
+              </TabTrigger>
+
+              <TabTrigger name="more" href="/more" asChild>
+                <TabButton styles={styles} icon="☰">
+                  More
+                </TabButton>
+              </TabTrigger>
+
+              {/* Hidden supervisor destinations */}
+              <TabTrigger name="delay-risk" href="/delay-risk" asChild>
+                <Pressable style={styles.hiddenTab} />
+              </TabTrigger>
+
+              <TabTrigger name="approvals" href="/approvals" asChild>
+                <Pressable style={styles.hiddenTab} />
+              </TabTrigger>
+
+              <TabTrigger
+                name="incident-management"
+                href="/incident-management"
+                asChild
+              >
+                <Pressable style={styles.hiddenTab} />
+              </TabTrigger>
+
+              <TabTrigger name="account" href="/account" asChild>
+                <Pressable style={styles.hiddenTab} />
+              </TabTrigger>
+            </>
+          )}
+        </CustomTabList>
+      </TabList>
+    </Tabs>
   );
+}
+
+type TabStyles = ReturnType<typeof createStyles>;
+
+function TabButton({
+  children,
+  isFocused,
+  styles,
+  icon,
+  ...props
+}: TabTriggerSlotProps & {
+  styles: TabStyles;
+  icon: string;
+}) {
+  return (
+    <Pressable
+      onPress={props.onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected: isFocused }}
+      style={({ pressed }) => [
+        styles.tabButton,
+        isFocused && styles.activeTab,
+        pressed && styles.pressed,
+      ]}
+    >
+      <Text style={[styles.tabIcon, isFocused && styles.activeTabIcon]}>
+        {icon}
+      </Text>
+
+      <Text
+        numberOfLines={1}
+        style={[
+          styles.tabText,
+          isFocused && styles.activeTabText,
+        ]}
+      >
+        {children}
+      </Text>
+    </Pressable>
+  );
+}
+
+function CustomTabList({
+  styles,
+  ...props
+}: TabListProps & {
+  styles: TabStyles;
+}) {
+  return (
+    <View {...props} style={styles.tabListContainer}>
+      <View style={styles.tabList}>
+        {props.children}
+      </View>
+    </View>
+  );
+}
+
+function createStyles() {
+  return StyleSheet.create({
+    tabListContainer: {
+      position: 'absolute',
+      bottom: 12,
+      left: 0,
+      right: 0,
+      alignItems: 'center',
+      paddingHorizontal: 12,
+    },
+
+    tabList: {
+      width: '100%',
+      maxWidth: 570,
+      minHeight: 70,
+      backgroundColor: '#FFFFFF',
+      borderWidth: 1,
+      borderColor: BORDER,
+      borderRadius: 38,
+      paddingHorizontal: 5,
+      paddingVertical: 5,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-around',
+      elevation: 7,
+      shadowColor: '#000000',
+      shadowOpacity: 0.09,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 4 },
+    },
+
+    tabButton: {
+      flex: 1,
+      minWidth: 0,
+      height: 58,
+      borderRadius: 30,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 2,
+      paddingHorizontal: 2,
+    },
+
+    hiddenTab: {
+      display: 'none',
+    },
+
+    activeTab: {
+      backgroundColor: '#FCECEF',
+    },
+
+    tabIcon: {
+      color: DARK,
+      fontSize: 22,
+      lineHeight: 26,
+      fontWeight: '600',
+    },
+
+    activeTabIcon: {
+      color: RED,
+    },
+
+    tabText: {
+      color: DARK,
+      fontSize: 10,
+      fontWeight: '600',
+      textAlign: 'center',
+    },
+
+    activeTabText: {
+      color: RED,
+      fontWeight: '800',
+    },
+
+    pressed: {
+      opacity: 0.65,
+    },
+  });
 }

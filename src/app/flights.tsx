@@ -1,23 +1,24 @@
+
 import { auth, db } from '@/lib/firebase';
 import {
-    collection,
-    doc,
-    getDoc,
-    onSnapshot,
-    serverTimestamp,
-    setDoc,
+  collection,
+  doc,
+  getDoc,
+  onSnapshot,
+  serverTimestamp,
+  setDoc,
 } from 'firebase/firestore';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  ActivityIndicator,
+  Alert,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -35,14 +36,16 @@ type Flight = {
   demoScenario?: string;
 };
 
-const RED = '#F0182B';
-const DEEP_RED = '#B51F3A';
-const BG = '#F5F5F6';
-const TEXT = '#222222';
-const MUTED = '#737373';
-const BORDER = '#E7E7E9';
-const GREEN = '#16805C';
-const ORANGE = '#C87916';
+type FlightTab = 'Today' | 'Upcoming' | 'Completed';
+
+const RED = '#C8102E';
+const DARK = '#20252B';
+const MUTED = '#747B83';
+const BORDER = '#E8E9EB';
+const BACKGROUND = '#F7F7F8';
+const GREEN = '#21834B';
+const BLUE = '#2868A8';
+const AMBER = '#A86A13';
 
 function showMessage(title: string, message: string) {
   if (Platform.OS === 'web') {
@@ -56,19 +59,58 @@ function dateString(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
-
   return `${year}-${month}-${day}`;
 }
 
 function timeString(date: Date) {
   const hours = String(date.getHours()).padStart(2, '0');
   const minutes = String(date.getMinutes()).padStart(2, '0');
-
   return `${hours}:${minutes}`;
 }
 
 function addMinutes(date: Date, minutes: number) {
   return new Date(date.getTime() + minutes * 60 * 1000);
+}
+
+function getStatusAppearance(status: string) {
+  const value = status.toLowerCase();
+
+  if (
+    value.includes('turnaround') ||
+    value.includes('boarding') ||
+    value.includes('progress')
+  ) {
+    return { backgroundColor: '#E5F0FC', color: BLUE };
+  }
+
+  if (
+    value.includes('risk') ||
+    value.includes('delay') ||
+    value.includes('cancel')
+  ) {
+    return { backgroundColor: '#FFF0D6', color: AMBER };
+  }
+
+  if (
+    value.includes('on time') ||
+    value.includes('complete') ||
+    value.includes('departed') ||
+    value.includes('arrived')
+  ) {
+    return { backgroundColor: '#E7F5E9', color: GREEN };
+  }
+
+  return { backgroundColor: '#ECEDEF', color: DARK };
+}
+
+function isCompleted(status: string) {
+  const value = status.toLowerCase();
+  return (
+    value.includes('complete') ||
+    value.includes('departed') ||
+    value.includes('arrived') ||
+    value.includes('landed')
+  );
 }
 
 export default function FlightsScreen({
@@ -80,6 +122,13 @@ export default function FlightsScreen({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [seeding, setSeeding] = useState(false);
+
+  const [activeTab, setActiveTab] = useState<FlightTab>('Today');
+  const [search, setSearch] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
+  const [showDateFilter, setShowDateFilter] = useState(false);
+  const [selectedStatus, setSelectedStatus] = useState('All');
+  const [selectedDate, setSelectedDate] = useState(dateString(new Date()));
   const [showForm, setShowForm] = useState(false);
 
   const [flightNumber, setFlightNumber] = useState('');
@@ -94,10 +143,23 @@ export default function FlightsScreen({
     const unsubscribe = onSnapshot(
       collection(db, 'Flights'),
       (snapshot) => {
-        const records = snapshot.docs.map((item) => ({
-          id: item.id,
-          ...item.data(),
-        })) as Flight[];
+        const records = snapshot.docs.map((item) => {
+          const data = item.data();
+
+          return {
+            id: item.id,
+            flightNumber: data.flightNumber ?? '',
+            origin: data.origin ?? '',
+            destination: data.destination ?? '',
+            departureDate: data.departureDate ?? '',
+            departureTime: data.departureTime ?? '',
+            arrivalDate: data.arrivalDate ?? '',
+            arrivalTime: data.arrivalTime ?? '',
+            status: data.status ?? 'Scheduled',
+            isDemo: data.isDemo ?? false,
+            demoScenario: data.demoScenario ?? '',
+          } as Flight;
+        });
 
         records.sort((a, b) =>
           `${a.departureDate} ${a.departureTime}`.localeCompare(
@@ -120,6 +182,54 @@ export default function FlightsScreen({
 
     return unsubscribe;
   }, []);
+
+  const today = dateString(new Date());
+
+  const tabFlights = useMemo(() => {
+    return flights.filter((flight) => {
+      if (activeTab === 'Today') {
+        return flight.departureDate === today;
+      }
+
+      if (activeTab === 'Upcoming') {
+        return flight.departureDate > today && !isCompleted(flight.status);
+      }
+
+      return isCompleted(flight.status);
+    });
+  }, [flights, activeTab, today]);
+
+  const filteredFlights = useMemo(() => {
+    const term = search.trim().toLowerCase();
+
+    return tabFlights.filter((flight) => {
+      const matchesSearch =
+        !term ||
+        flight.flightNumber.toLowerCase().includes(term) ||
+        flight.origin.toLowerCase().includes(term) ||
+        flight.destination.toLowerCase().includes(term);
+
+      const matchesStatus =
+        selectedStatus === 'All' ||
+        flight.status.toLowerCase() === selectedStatus.toLowerCase();
+
+      const matchesDate =
+        !showDateFilter || flight.departureDate === selectedDate;
+
+      return matchesSearch && matchesStatus && matchesDate;
+    });
+  }, [
+    tabFlights,
+    search,
+    selectedStatus,
+    showDateFilter,
+    selectedDate,
+  ]);
+
+  const availableStatuses = useMemo(
+    () => ['All', ...Array.from(new Set(tabFlights.map((f) => f.status)))],
+    [tabFlights]
+  );
 
   function resetForm() {
     setFlightNumber('');
@@ -209,10 +319,9 @@ export default function FlightsScreen({
 
       resetForm();
       setShowForm(false);
-
       showMessage(
         'Flight created',
-        `${cleanFlightNumber} has been added to Flight Management.`
+        `${cleanFlightNumber} has been added to AeroSync.`
       );
     } catch (error) {
       console.error('Flight creation failed:', error);
@@ -269,14 +378,9 @@ export default function FlightsScreen({
       let alreadyExisted = 0;
 
       for (const scenario of scenarios) {
-        const departure = addMinutes(
-          now,
-          scenario.minutesUntilDeparture
-        );
-
+        const departure = addMinutes(now, scenario.minutesUntilDeparture);
         const arrival = addMinutes(departure, 60);
 
-        // A stable ID prevents duplicate demo records for the same day.
         const demoId = `demo_${scenario.id}_${dateString(now)}`;
         const flightRef = doc(db, 'Flights', demoId);
         const existing = await getDoc(flightRef);
@@ -320,513 +424,755 @@ export default function FlightsScreen({
     }
   }
 
+  function changeTab(tab: FlightTab) {
+    setActiveTab(tab);
+    setSelectedStatus('All');
+    setShowDateFilter(false);
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
-        <Pressable onPress={onBack} style={styles.backButton}>
-          <Text style={styles.backText}>← Back to dashboard</Text>
-        </Pressable>
-
-        <Text style={styles.eyebrow}>OPERATIONS MANAGEMENT</Text>
-
-        <Text style={styles.heading}>Flight management</Text>
-
-        <Text style={styles.subtitle}>
-          Create and manage the flights used for baggage tracking and crew coordination.
-        </Text>
-
-        <View style={styles.summaryCard}>
-          <Text style={styles.summaryLabel}>Flights in AeroSync</Text>
-
-          <Text style={styles.summaryNumber}>
-            {loading ? '—' : flights.length}
-          </Text>
-
-          <Text style={styles.summaryHint}>
-            Includes both operational and demo flights.
-          </Text>
-        </View>
-
-        <View style={styles.buttonRow}>
-          <Pressable
-            onPress={() => setShowForm(!showForm)}
-            style={styles.primaryButton}
-          >
-            <Text style={styles.primaryButtonText}>
-              {showForm ? 'Close form' : '+ Create flight'}
-            </Text>
+      <View style={styles.screen}>
+        {/* Header */}
+        <View style={styles.header}>
+          <Pressable onPress={onBack} style={styles.backButton}>
+            <Text style={styles.backIcon}>‹</Text>
           </Pressable>
-        </View>
 
-        <Pressable
-          onPress={loadDemoFlights}
-          disabled={seeding}
-          style={[
-            styles.demoButton,
-            seeding && styles.disabledButton,
-          ]}
-        >
-          {seeding ? (
-            <ActivityIndicator color={DEEP_RED} />
-          ) : (
-            <Text style={styles.demoButtonText}>
-              Load sample demo flights
-            </Text>
-          )}
-        </Pressable>
+          <Text style={styles.heading}>Flights</Text>
 
-        <Text style={styles.demoNote}>
-          Sample records are fictional and visibly marked DEMO. Loading them again will not create duplicates for the same day.
-        </Text>
-
-        {showForm && (
-          <View style={styles.formCard}>
-            <Text style={styles.formTitle}>New flight details</Text>
-
-            <Text style={styles.label}>FLIGHT NUMBER *</Text>
-
-            <TextInput
-              style={styles.input}
-              placeholder="e.g. KQ100"
-              value={flightNumber}
-              onChangeText={setFlightNumber}
-              autoCapitalize="characters"
-              editable={!saving}
-            />
-
-            <Text style={styles.label}>ORIGIN *</Text>
-
-            <TextInput
-              style={styles.input}
-              placeholder="e.g. Nairobi"
-              value={origin}
-              onChangeText={setOrigin}
-              editable={!saving}
-            />
-
-            <Text style={styles.label}>DESTINATION *</Text>
-
-            <TextInput
-              style={styles.input}
-              placeholder="e.g. Mombasa"
-              value={destination}
-              onChangeText={setDestination}
-              editable={!saving}
-            />
-
-            <Text style={styles.label}>DEPARTURE DATE *</Text>
-
-            <TextInput
-              style={styles.input}
-              placeholder="YYYY-MM-DD"
-              value={departureDate}
-              onChangeText={setDepartureDate}
-              editable={!saving}
-            />
-
-            <Text style={styles.label}>DEPARTURE TIME *</Text>
-
-            <TextInput
-              style={styles.input}
-              placeholder="HH:MM (24-hour format)"
-              value={departureTime}
-              onChangeText={setDepartureTime}
-              editable={!saving}
-            />
-
-            <Text style={styles.label}>ARRIVAL DATE</Text>
-
-            <TextInput
-              style={styles.input}
-              placeholder="YYYY-MM-DD"
-              value={arrivalDate}
-              onChangeText={setArrivalDate}
-              editable={!saving}
-            />
-
-            <Text style={styles.label}>ARRIVAL TIME</Text>
-
-            <TextInput
-              style={styles.input}
-              placeholder="HH:MM (24-hour format)"
-              value={arrivalTime}
-              onChangeText={setArrivalTime}
-              editable={!saving}
-            />
+          <View style={styles.headerActions}>
+            <Pressable
+              onPress={() => setShowFilters(!showFilters)}
+              style={[
+                styles.headerIconButton,
+                showFilters && styles.headerIconActive,
+              ]}
+              accessibilityLabel="Filter flights"
+            >
+              <Text style={styles.headerIcon}>▽</Text>
+            </Pressable>
 
             <Pressable
-              onPress={createFlight}
-              disabled={saving}
+              onPress={() => setShowDateFilter(!showDateFilter)}
               style={[
-                styles.primaryButton,
-                saving && styles.disabledButton,
+                styles.headerIconButton,
+                showDateFilter && styles.headerIconActive,
               ]}
+              accessibilityLabel="Filter flights by date"
             >
-              {saving ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.primaryButtonText}>
-                  Save flight
-                </Text>
-              )}
+              <Text style={styles.calendarIcon}>▣</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => setShowForm(!showForm)}
+              style={styles.addButton}
+              accessibilityLabel="Create a flight"
+            >
+              <Text style={styles.addButtonText}>＋</Text>
+            </Pressable>
+          </View>
+        </View>
+
+        {/* Tabs */}
+        <View style={styles.tabs}>
+          {(['Today', 'Upcoming', 'Completed'] as FlightTab[]).map((tab) => (
+            <Pressable
+              key={tab}
+              onPress={() => changeTab(tab)}
+              style={styles.tab}
+            >
+              <Text
+                style={[
+                  styles.tabText,
+                  activeTab === tab && styles.activeTabText,
+                ]}
+              >
+                {tab}
+              </Text>
+              {activeTab === tab && <View style={styles.tabUnderline} />}
+            </Pressable>
+          ))}
+        </View>
+
+        {/* Search */}
+        <View style={styles.searchBar}>
+          <Text style={styles.searchIcon}>⌕</Text>
+          <TextInput
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Search flight (e.g. KQ102)..."
+            placeholderTextColor="#969CA3"
+            style={styles.searchInput}
+            autoCapitalize="characters"
+            returnKeyType="search"
+          />
+          {search.length > 0 && (
+            <Pressable onPress={() => setSearch('')}>
+              <Text style={styles.clearSearch}>×</Text>
+            </Pressable>
+          )}
+        </View>
+
+        {/* Date filter */}
+        {showDateFilter && (
+          <View style={styles.filterPanel}>
+            <Text style={styles.filterPanelTitle}>Departure date</Text>
+            <TextInput
+              value={selectedDate}
+              onChangeText={setSelectedDate}
+              placeholder="YYYY-MM-DD"
+              style={styles.dateInput}
+            />
+            <Pressable
+              onPress={() => {
+                setSelectedDate(today);
+                setShowDateFilter(false);
+              }}
+            >
+              <Text style={styles.resetFilter}>Reset to today</Text>
             </Pressable>
           </View>
         )}
 
-        <Text style={styles.sectionTitle}>All flights</Text>
-
-        {loading ? (
-          <ActivityIndicator
-            size="large"
-            color={RED}
-            style={styles.loader}
-          />
-        ) : flights.length === 0 ? (
-          <View style={styles.emptyCard}>
-            <Text style={styles.emptyTitle}>No flights yet</Text>
-
-            <Text style={styles.emptyText}>
-              Create a flight manually or load the sample demo flights to explore AeroSync.
-            </Text>
-          </View>
-        ) : (
-          flights.map((flight) => (
-            <View key={flight.id} style={styles.flightCard}>
-              <View style={styles.flightTop}>
-                <View style={styles.flightInfo}>
-                  <Text style={styles.flightNumber}>
-                    {flight.flightNumber}
-                  </Text>
-
-                  <Text style={styles.route}>
-                    {flight.origin} → {flight.destination}
-                  </Text>
-                </View>
-
-                <View
+        {/* Status filters */}
+        {showFilters && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.filterScroll}
+            contentContainerStyle={styles.filterOptions}
+          >
+            {availableStatuses.map((status) => (
+              <Pressable
+                key={status}
+                onPress={() => setSelectedStatus(status)}
+                style={[
+                  styles.filterChip,
+                  selectedStatus === status && styles.filterChipActive,
+                ]}
+              >
+                <Text
                   style={[
-                    styles.statusBadge,
-                    flight.isDemo && styles.demoBadge,
+                    styles.filterChipText,
+                    selectedStatus === status && styles.filterChipTextActive,
                   ]}
                 >
-                  <Text
-                    style={[
-                      styles.statusText,
-                      flight.isDemo && styles.demoBadgeText,
-                    ]}
-                  >
-                    {flight.isDemo ? 'DEMO' : flight.status}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.flightDivider} />
-
-              <Text style={styles.flightDetail}>
-                Departure: {flight.departureDate} at {flight.departureTime}
-              </Text>
-
-              {flight.arrivalDate && flight.arrivalTime ? (
-                <Text style={styles.flightDetail}>
-                  Arrival: {flight.arrivalDate} at {flight.arrivalTime}
+                  {status}
                 </Text>
-              ) : null}
-
-              {flight.demoScenario ? (
-                <Text style={styles.scenario}>
-                  Scenario: {flight.demoScenario.replaceAll('-', ' ')}
-                </Text>
-              ) : null}
-            </View>
-          ))
+              </Pressable>
+            ))}
+          </ScrollView>
         )}
 
-        <Text style={styles.footer}>
-          AEROSYNC · GROUND OPERATIONS
-        </Text>
-      </ScrollView>
+        {/* Flight list */}
+        <ScrollView
+          style={styles.list}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {showForm && (
+            <View style={styles.formCard}>
+              <View style={styles.formHeader}>
+                <Text style={styles.formTitle}>New flight</Text>
+                <Pressable onPress={() => setShowForm(false)}>
+                  <Text style={styles.closeForm}>×</Text>
+                </Pressable>
+              </View>
+
+              <Text style={styles.formLabel}>FLIGHT NUMBER</Text>
+              <TextInput
+                style={styles.formInput}
+                placeholder="e.g. KQ100"
+                value={flightNumber}
+                onChangeText={setFlightNumber}
+                autoCapitalize="characters"
+              />
+
+              <Text style={styles.formLabel}>ORIGIN</Text>
+              <TextInput
+                style={styles.formInput}
+                placeholder="e.g. NBO"
+                value={origin}
+                onChangeText={setOrigin}
+              />
+
+              <Text style={styles.formLabel}>DESTINATION</Text>
+              <TextInput
+                style={styles.formInput}
+                placeholder="e.g. JNB"
+                value={destination}
+                onChangeText={setDestination}
+              />
+
+              <Text style={styles.formLabel}>DEPARTURE DATE (YYYY-MM-DD)</Text>
+              <TextInput
+                style={styles.formInput}
+                value={departureDate}
+                onChangeText={setDepartureDate}
+                placeholder="YYYY-MM-DD"
+              />
+
+              <Text style={styles.formLabel}>DEPARTURE TIME (HH:MM)</Text>
+              <TextInput
+                style={styles.formInput}
+                value={departureTime}
+                onChangeText={setDepartureTime}
+                placeholder="HH:MM"
+              />
+
+              <Text style={styles.formLabel}>ARRIVAL DATE</Text>
+              <TextInput
+                style={styles.formInput}
+                value={arrivalDate}
+                onChangeText={setArrivalDate}
+                placeholder="YYYY-MM-DD"
+              />
+
+              <Text style={styles.formLabel}>ARRIVAL TIME</Text>
+              <TextInput
+                style={styles.formInput}
+                value={arrivalTime}
+                onChangeText={setArrivalTime}
+                placeholder="HH:MM"
+              />
+
+              <Pressable
+                onPress={createFlight}
+                disabled={saving}
+                style={styles.saveButton}
+              >
+                {saving ? (
+                  <ActivityIndicator color={WHITE} />
+                ) : (
+                  <Text style={styles.saveButtonText}>Save flight</Text>
+                )}
+              </Pressable>
+
+              <Pressable
+                onPress={loadDemoFlights}
+                disabled={seeding}
+                style={styles.demoButton}
+              >
+                {seeding ? (
+                  <ActivityIndicator color={RED} />
+                ) : (
+                  <Text style={styles.demoButtonText}>
+                    Load sample demo flights
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+          )}
+
+          <View style={styles.resultsHeading}>
+            <Text style={styles.resultsCount}>
+              {activeTab === 'Today'
+                ? 'TODAY'
+                : activeTab === 'Upcoming'
+                  ? 'UPCOMING DEPARTURES'
+                  : 'COMPLETED FLIGHTS'}
+            </Text>
+            <Text style={styles.resultsNumber}>
+              {loading ? '—' : filteredFlights.length}
+            </Text>
+          </View>
+
+          {loading ? (
+            <View style={styles.emptyState}>
+              <ActivityIndicator color={RED} size="large" />
+              <Text style={styles.emptyText}>Loading flights...</Text>
+            </View>
+          ) : filteredFlights.length === 0 ? (
+            <View style={styles.emptyState}>
+              <View style={styles.emptyIconCircle}>
+                <Text style={styles.emptyPlane}>✈</Text>
+              </View>
+              <Text style={styles.emptyTitle}>No flights found</Text>
+              <Text style={styles.emptyText}>
+                {search
+                  ? 'Try another flight number or route.'
+                  : activeTab === 'Today'
+                    ? 'There are no flights scheduled for today.'
+                    : activeTab === 'Upcoming'
+                      ? 'There are no upcoming departures.'
+                      : 'Completed flights will appear here.'}
+              </Text>
+              {!search && activeTab === 'Today' && (
+                <Pressable onPress={() => setShowForm(true)}>
+                  <Text style={styles.emptyAction}>＋ Add a flight</Text>
+                </Pressable>
+              )}
+            </View>
+          ) : (
+            <View style={styles.flightList}>
+              {filteredFlights.map((flight, index) => {
+                const appearance = getStatusAppearance(flight.status);
+
+                return (
+                  <View
+                    key={flight.id}
+                    style={[
+                      styles.flightRow,
+                      index === filteredFlights.length - 1 &&
+                        styles.lastFlightRow,
+                    ]}
+                  >
+                    <View style={styles.flightIdentity}>
+                      <Text style={styles.flightNumber}>
+                        {flight.flightNumber}
+                      </Text>
+                      <Text style={styles.flightRoute}>
+                        {flight.origin} → {flight.destination}
+                      </Text>
+                      {flight.isDemo && (
+                        <Text style={styles.demoLabel}>DEMO RECORD</Text>
+                      )}
+                    </View>
+
+                    <Text style={styles.flightTime}>
+                      {flight.departureTime || '—'}
+                    </Text>
+
+                    <View
+                      style={[
+                        styles.statusBadge,
+                        { backgroundColor: appearance.backgroundColor },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.statusText,
+                          { color: appearance.color },
+                        ]}
+                      >
+                        {flight.status}
+                      </Text>
+                    </View>
+
+                    <Text style={styles.rowChevron}>›</Text>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+
+          <View style={styles.bottomSpace} />
+        </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
 
-// --------------------------------------------------
-// STYLES
-// --------------------------------------------------
+const WHITE = '#FFFFFF';
 
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: BG,
+    backgroundColor: BACKGROUND,
   },
-
-  content: {
-    padding: 20,
-    paddingBottom: 45,
+  screen: {
+    flex: 1,
     width: '100%',
-    maxWidth: 900,
+    maxWidth: 760,
     alignSelf: 'center',
+    paddingHorizontal: 19,
   },
 
+  /* Header */
+  header: {
+    height: 65,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 13,
+  },
   backButton: {
-    alignSelf: 'flex-start',
-    marginBottom: 20,
-    paddingVertical: 5,
+    width: 27,
+    height: 42,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
   },
-
-  backText: {
-    color: RED,
-    fontSize: 13,
-    fontWeight: '800',
+  backIcon: {
+    color: DARK,
+    fontSize: 36,
+    lineHeight: 40,
+    fontWeight: '300',
   },
-
-  eyebrow: {
-    color: DEEP_RED,
-    fontSize: 10,
-    fontWeight: '900',
-    letterSpacing: 1,
-  },
-
   heading: {
-    color: TEXT,
-    fontSize: 28,
+    flex: 1,
+    color: DARK,
+    fontSize: 22,
     fontWeight: '900',
-    marginTop: 6,
+    letterSpacing: -0.6,
   },
-
-  subtitle: {
-    color: MUTED,
-    fontSize: 13,
-    lineHeight: 20,
-    marginTop: 7,
-    marginBottom: 18,
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
   },
-
-  summaryCard: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 17,
-    padding: 18,
-    marginBottom: 14,
+  headerIconButton: {
+    width: 34,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 9,
   },
-
-  summaryLabel: {
-    color: MUTED,
-    fontSize: 12,
+  headerIconActive: {
+    backgroundColor: '#F9E9EC',
+  },
+  headerIcon: {
+    color: DARK,
+    fontSize: 25,
     fontWeight: '700',
   },
-
-  summaryNumber: {
-    color: TEXT,
-    fontSize: 32,
-    fontWeight: '900',
-    marginTop: 5,
+  calendarIcon: {
+    color: DARK,
+    fontSize: 21,
   },
-
-  summaryHint: {
-    color: MUTED,
-    fontSize: 11,
-    marginTop: 3,
-  },
-
-  buttonRow: {
-    marginBottom: 10,
-  },
-
-  primaryButton: {
-    backgroundColor: RED,
-    borderRadius: 12,
-    padding: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 48,
-  },
-
-  primaryButtonText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '900',
-  },
-
-  demoButton: {
-    backgroundColor: '#FDECEF',
-    borderWidth: 1,
-    borderColor: '#F2C5CC',
-    borderRadius: 12,
-    padding: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 46,
-  },
-
-  demoButtonText: {
-    color: DEEP_RED,
-    fontSize: 13,
-    fontWeight: '800',
-  },
-
-  disabledButton: {
-    opacity: 0.6,
-  },
-
-  demoNote: {
-    color: MUTED,
-    fontSize: 11,
-    lineHeight: 17,
-    marginTop: 9,
-    marginBottom: 20,
-  },
-
-  formCard: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: BORDER,
+  addButton: {
+    width: 31,
+    height: 31,
     borderRadius: 17,
-    padding: 17,
-    marginBottom: 22,
+    backgroundColor: RED,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 1,
+  },
+  addButtonText: {
+    color: WHITE,
+    fontSize: 23,
+    lineHeight: 27,
+    fontWeight: '500',
   },
 
-  formTitle: {
-    color: TEXT,
-    fontSize: 18,
+  /* Tabs */
+  tabs: {
+    flexDirection: 'row',
+    height: 56,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
+    marginBottom: 16,
+  },
+  tab: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  tabText: {
+    color: '#777E86',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  activeTabText: {
+    color: RED,
     fontWeight: '900',
-    marginBottom: 15,
+  },
+  tabUnderline: {
+    position: 'absolute',
+    bottom: -1,
+    left: 7,
+    right: 7,
+    height: 3,
+    borderRadius: 3,
+    backgroundColor: RED,
   },
 
-  label: {
-    color: DEEP_RED,
-    fontSize: 10,
-    fontWeight: '900',
-    letterSpacing: 0.6,
-    marginTop: 13,
-    marginBottom: 7,
+  /* Search */
+  searchBar: {
+    height: 45,
+    backgroundColor: '#ECEDEF',
+    borderRadius: 13,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 13,
+    marginBottom: 16,
+  },
+  searchIcon: {
+    color: '#555D65',
+    fontSize: 25,
+    marginRight: 9,
+  },
+  searchInput: {
+    flex: 1,
+    color: DARK,
+    fontSize: 13,
+    paddingVertical: 0,
+    outlineStyle: 'none',
+  } as any,
+  clearSearch: {
+    color: MUTED,
+    fontSize: 22,
+    paddingHorizontal: 4,
   },
 
-  input: {
-    backgroundColor: '#FAFAFB',
+  /* Filters */
+  filterPanel: {
+    backgroundColor: WHITE,
     borderWidth: 1,
     borderColor: BORDER,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    color: TEXT,
-    fontSize: 14,
+    borderRadius: 12,
+    padding: 13,
+    marginBottom: 13,
   },
-
-  sectionTitle: {
-    color: TEXT,
-    fontSize: 19,
-    fontWeight: '900',
+  filterPanelTitle: {
+    color: DARK,
+    fontSize: 12,
+    fontWeight: '800',
+    marginBottom: 8,
+  },
+  dateInput: {
+    height: 40,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    color: DARK,
+    fontSize: 13,
+  },
+  resetFilter: {
+    color: RED,
+    fontSize: 11,
+    fontWeight: '800',
+    marginTop: 9,
+  },
+  filterScroll: {
+    maxHeight: 43,
     marginBottom: 12,
   },
-
-  loader: {
-    marginTop: 25,
+  filterOptions: {
+    alignItems: 'center',
+    gap: 8,
+    paddingRight: 5,
   },
-
-  emptyCard: {
-    backgroundColor: '#FFFFFF',
+  filterChip: {
     borderWidth: 1,
     borderColor: BORDER,
-    borderRadius: 15,
-    padding: 20,
+    borderRadius: 18,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+    backgroundColor: WHITE,
   },
-
-  emptyTitle: {
-    color: TEXT,
-    fontSize: 15,
-    fontWeight: '900',
+  filterChipActive: {
+    borderColor: RED,
+    backgroundColor: '#FCEEF0',
   },
-
-  emptyText: {
+  filterChipText: {
     color: MUTED,
-    fontSize: 12,
-    lineHeight: 19,
-    marginTop: 6,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  filterChipTextActive: {
+    color: RED,
   },
 
-  flightCard: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 15,
-    padding: 15,
-    marginBottom: 10,
+  /* Results */
+  list: {
+    flex: 1,
   },
-
-  flightTop: {
+  listContent: {
+    paddingBottom: 25,
+  },
+  resultsHeading: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 10,
+    marginBottom: 8,
+    paddingHorizontal: 2,
   },
-
-  flightInfo: {
-    flex: 1,
-  },
-
-  flightNumber: {
-    color: TEXT,
-    fontSize: 17,
-    fontWeight: '900',
-  },
-
-  route: {
+  resultsCount: {
     color: MUTED,
-    fontSize: 12,
-    marginTop: 4,
-  },
-
-  statusBadge: {
-    backgroundColor: '#E8F5EF',
-    borderRadius: 20,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-
-  statusText: {
-    color: GREEN,
     fontSize: 9,
     fontWeight: '900',
+    letterSpacing: 0.9,
   },
-
-  demoBadge: {
-    backgroundColor: '#FDECEF',
-  },
-
-  demoBadgeText: {
-    color: DEEP_RED,
-  },
-
-  flightDivider: {
-    height: 1,
-    backgroundColor: BORDER,
-    marginVertical: 12,
-  },
-
-  flightDetail: {
-    color: MUTED,
-    fontSize: 11,
-    marginTop: 4,
-  },
-
-  scenario: {
-    color: ORANGE,
-    fontSize: 10,
-    fontWeight: '800',
-    marginTop: 8,
-    textTransform: 'capitalize',
-  },
-
-  footer: {
+  resultsNumber: {
     color: MUTED,
     fontSize: 10,
     fontWeight: '700',
-    letterSpacing: 1,
+  },
+  flightList: {
+    backgroundColor: WHITE,
+    borderRadius: 13,
+    paddingHorizontal: 13,
+    borderWidth: 1,
+    borderColor: '#EFF0F1',
+  },
+  flightRow: {
+    minHeight: 77,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EFF0F1',
+  },
+  lastFlightRow: {
+    borderBottomWidth: 0,
+  },
+  flightIdentity: {
+    flex: 1,
+    minWidth: 0,
+  },
+  flightNumber: {
+    color: DARK,
+    fontSize: 15,
+    fontWeight: '900',
+    letterSpacing: -0.3,
+  },
+  flightRoute: {
+    color: '#69717A',
+    fontSize: 11,
+    fontWeight: '500',
+    marginTop: 4,
+  },
+  flightTime: {
+    width: 52,
     textAlign: 'center',
-    marginTop: 25,
+    color: DARK,
+    fontSize: 14,
+    fontWeight: '900',
+    fontVariant: ['tabular-nums'],
+  },
+  statusBadge: {
+    minWidth: 82,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    borderRadius: 18,
+  },
+  statusText: {
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  rowChevron: {
+    color: '#59616A',
+    fontSize: 25,
+    fontWeight: '400',
+    marginLeft: 1,
+  },
+  demoLabel: {
+    color: RED,
+    fontSize: 8,
+    fontWeight: '900',
+    marginTop: 3,
+    letterSpacing: 0.5,
+  },
+
+  /* Empty state */
+  emptyState: {
+    backgroundColor: WHITE,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 13,
+    minHeight: 180,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 22,
+    paddingVertical: 24,
+  },
+  emptyIconCircle: {
+    width: 43,
+    height: 43,
+    borderRadius: 22,
+    backgroundColor: '#F9E9EC',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  emptyPlane: {
+    color: RED,
+    fontSize: 22,
+  },
+  emptyTitle: {
+    color: DARK,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  emptyText: {
+    color: MUTED,
+    fontSize: 11,
+    lineHeight: 17,
+    textAlign: 'center',
+    marginTop: 6,
+  },
+  emptyAction: {
+    color: RED,
+    fontSize: 12,
+    fontWeight: '900',
+    marginTop: 13,
+  },
+
+  /* Create flight */
+  formCard: {
+    backgroundColor: WHITE,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 13,
+    padding: 15,
+    marginBottom: 18,
+  },
+  formHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  formTitle: {
+    color: DARK,
+    fontSize: 17,
+    fontWeight: '900',
+  },
+  closeForm: {
+    color: MUTED,
+    fontSize: 25,
+  },
+  formLabel: {
+    color: MUTED,
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  formInput: {
+    height: 42,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 8,
+    paddingHorizontal: 11,
+    color: DARK,
+    fontSize: 13,
+    backgroundColor: '#FAFAFB',
+  },
+  saveButton: {
+    height: 45,
+    backgroundColor: RED,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 17,
+  },
+  saveButtonText: {
+    color: WHITE,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  demoButton: {
+    height: 42,
+    backgroundColor: '#FCEEF0',
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 9,
+  },
+  demoButtonText: {
+    color: RED,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  bottomSpace: {
+    height: 25,
   },
 });

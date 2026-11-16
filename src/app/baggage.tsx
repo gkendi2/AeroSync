@@ -1,37 +1,26 @@
 
 import { db } from '@/lib/firebase';
+import { useRouter } from 'expo-router';
 import {
   collection,
   onSnapshot,
   orderBy,
   query,
 } from 'firebase/firestore';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import {
   ActivityIndicator,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TouchableOpacity,
+  TextInput,
   View,
 } from 'react-native';
 
 import RegisterBaggageScreen from '@/components/register-baggage-screen';
-
-import {
-  AeroSyncColors,
-  AeroSyncComponents,
-  AeroSyncRadius,
-  AeroSyncShadows,
-  AeroSyncSpacing,
-  AeroSyncStatus,
-  AeroSyncTypography,
-} from '@/constants/theme';
-
-// --------------------------------------------------
-// TYPES
-// --------------------------------------------------
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 type BaggageRecord = {
   id: string;
@@ -49,51 +38,55 @@ type BaggageScreenProps = {
   onBack?: () => void;
 };
 
-// --------------------------------------------------
-// STATUS HELPER
-// --------------------------------------------------
+type BaggageFilter = 'All' | 'Registered' | 'Loading' | 'Offloaded';
 
-function getStatusStyle(status?: string) {
-  const normalized = (status || 'registered').toLowerCase();
+const RED = '#C8102E';
+const DARK = '#24272B';
+const MUTED = '#747B83';
+const BORDER = '#E9EAEC';
+const BACKGROUND = '#FFFFFF';
+const WHITE = '#FFFFFF';
+
+function getStatusAppearance(status?: string) {
+  const normalized = (status || 'Registered').toLowerCase();
 
   if (normalized === 'offloaded') {
     return {
-      backgroundColor: AeroSyncStatus.offloaded.background,
-      color: AeroSyncStatus.offloaded.color,
-      label: AeroSyncStatus.offloaded.label,
+      label: 'Offloaded',
+      background: '#E7F4E9',
+      color: '#27814B',
     };
   }
 
   if (normalized === 'loading') {
     return {
-      backgroundColor: AeroSyncStatus.loading.background,
-      color: AeroSyncStatus.loading.color,
-      label: AeroSyncStatus.loading.label,
+      label: 'Loading',
+      background: '#E8F0FB',
+      color: '#2868A8',
     };
   }
 
   return {
-    backgroundColor: AeroSyncStatus.registered.background,
-    color: AeroSyncStatus.registered.color,
-    label: status || AeroSyncStatus.registered.label,
+    label: status || 'Registered',
+    background: '#FCECEF',
+    color: RED,
   };
 }
 
-// --------------------------------------------------
-// MAIN SCREEN
-// --------------------------------------------------
-
 export default function BaggageScreen({ onBack }: BaggageScreenProps) {
+  const router = useRouter();
+
   const [records, setRecords] = useState<BaggageRecord[]>([]);
   const [showRegisterForm, setShowRegisterForm] = useState(false);
   const [loading, setLoading] = useState(true);
-
-  // FIRESTORE SUBSCRIPTION
+  const [search, setSearch] = useState('');
+  const [activeFilter, setActiveFilter] =
+    useState<BaggageFilter>('All');
 
   useEffect(() => {
     const baggageQuery = query(
       collection(db, 'BaggageRecords'),
-      orderBy('createdAt', 'desc'),
+      orderBy('createdAt', 'desc')
     );
 
     const unsubscribe = onSnapshot(
@@ -103,7 +96,7 @@ export default function BaggageScreen({ onBack }: BaggageScreenProps) {
           (record) => ({
             id: record.id,
             ...(record.data() as Omit<BaggageRecord, 'id'>),
-          }),
+          })
         );
 
         setRecords(baggageRecords);
@@ -112,13 +105,54 @@ export default function BaggageScreen({ onBack }: BaggageScreenProps) {
       (error) => {
         console.error('Error loading baggage records:', error);
         setLoading(false);
-      },
+      }
     );
 
     return unsubscribe;
   }, []);
 
-  // REGISTRATION SCREEN
+  const counts = useMemo(() => {
+    const registered = records.filter(
+      (record) =>
+        (record.status || 'Registered').toLowerCase() === 'registered'
+    ).length;
+
+    const loadingCount = records.filter(
+      (record) => (record.status || '').toLowerCase() === 'loading'
+    ).length;
+
+    const offloaded = records.filter(
+      (record) => (record.status || '').toLowerCase() === 'offloaded'
+    ).length;
+
+    return {
+      All: records.length,
+      Registered: registered,
+      Loading: loadingCount,
+      Offloaded: offloaded,
+    };
+  }, [records]);
+
+  const filteredRecords = useMemo(() => {
+    const term = search.trim().toLowerCase();
+
+    return records.filter((record) => {
+      const status = (record.status || 'Registered').toLowerCase();
+
+      const matchesFilter =
+        activeFilter === 'All' ||
+        status === activeFilter.toLowerCase();
+
+      const matchesSearch =
+        !term ||
+        (record.baggageId || '').toLowerCase().includes(term) ||
+        record.id.toLowerCase().includes(term) ||
+        (record.flightId || '').toLowerCase().includes(term) ||
+        (record.baggageReference || '').toLowerCase().includes(term);
+
+      return matchesFilter && matchesSearch;
+    });
+  }, [records, activeFilter, search]);
 
   if (showRegisterForm) {
     return (
@@ -128,844 +162,460 @@ export default function BaggageScreen({ onBack }: BaggageScreenProps) {
     );
   }
 
-  // LIVE STATUS COUNTS
+  const filters: BaggageFilter[] = [
+    'All',
+    'Registered',
+    'Loading',
+    'Offloaded',
+  ];
 
-  const registeredCount = records.filter(
-    (record) =>
-      (record.status || 'Registered').toLowerCase() === 'registered',
-  ).length;
-
-  const loadingCount = records.filter(
-    (record) =>
-      (record.status || '').toLowerCase() === 'loading',
-  ).length;
-
-  const offloadedCount = records.filter(
-    (record) =>
-      (record.status || '').toLowerCase() === 'offloaded',
-  ).length;
+  function handleBack() {
+    if (onBack) {
+      onBack();
+    } else {
+      router.back();
+    }
+  }
 
   return (
-    <View style={styles.container}>
-      <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* BRAND HEADER */}
-
-        <View style={styles.topHeader}>
-          <View style={styles.brandSection}>
-            <View style={styles.brandIcon}>
-              <Text style={styles.brandIconText}>A</Text>
-            </View>
-
-            <View>
-              <Text style={styles.brandName}>AeroSync</Text>
-              <Text style={styles.brandSubtitle}>
-                KENYA AIRWAYS · SUPERVISOR
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.liveBadge}>
-            <View style={styles.liveDot} />
-            <Text style={styles.liveText}>LIVE</Text>
-          </View>
-        </View>
-
-        {/* BACK BUTTON */}
-
-        {onBack ? (
-          <TouchableOpacity
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.screen}>
+        {/* HEADER */}
+        <View style={styles.header}>
+          <Pressable
+            onPress={handleBack}
             style={styles.backButton}
-            onPress={onBack}
+            accessibilityLabel="Go back"
           >
-            <Text style={styles.backButtonText}>‹  Back</Text>
-          </TouchableOpacity>
-        ) : null}
+            <Text style={styles.backIcon}>‹</Text>
+          </Pressable>
 
-        {/* PAGE HEADING */}
+          <Text style={styles.heading}>Baggage</Text>
 
-        <View style={styles.headingSection}>
-          <Text style={styles.eyebrow}>GROUND OPERATIONS</Text>
-          <Text style={styles.title}>Baggage Operations</Text>
-
-          <Text style={styles.subtitle}>
-            Monitor baggage registration, loading and offloading
-            across your operations.
-          </Text>
+          <Pressable
+            onPress={() => router.push('/scan-qr' as any)}
+            style={styles.qrButton}
+            accessibilityLabel="Open QR scanner"
+          >
+            <Text style={styles.qrIcon}>▦</Text>
+          </Pressable>
         </View>
 
-        {/* OPERATIONS BANNER */}
+        {/* SEARCH */}
+        <View style={styles.searchBar}>
+          <Text style={styles.searchIcon}>⌕</Text>
 
-        <View style={styles.heroCard}>
-          <View style={styles.heroTop}>
-            <View style={styles.heroTextSection}>
-              <Text style={styles.heroEyebrow}>
-                BAGGAGE CONTROL
-              </Text>
+          <TextInput
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Search by bag tag, flight or reference..."
+            placeholderTextColor="#9299A0"
+            style={styles.searchInput}
+            autoCapitalize="none"
+            returnKeyType="search"
+          />
 
-              <Text style={styles.heroTitle}>
-                Every bag, accounted for.
-              </Text>
-
-              <Text style={styles.heroDescription}>
-                Keep track of baggage movement from registration
-                through to offloading.
-              </Text>
-            </View>
-
-            <View style={styles.heroIcon}>
-              <Text style={styles.heroPlane}>✈</Text>
-            </View>
-          </View>
-
-          <View style={styles.heroDivider} />
-
-          <View style={styles.totalSection}>
-            <Text style={styles.totalLabel}>
-              TOTAL BAGGAGE RECORDS
-            </Text>
-            <Text style={styles.totalNumber}>
-              {records.length}
-            </Text>
-          </View>
+          {search.length > 0 && (
+            <Pressable onPress={() => setSearch('')}>
+              <Text style={styles.clearSearch}>×</Text>
+            </Pressable>
+          )}
         </View>
 
-        {/* STATUS SUMMARY */}
-
-        <View style={styles.sectionHeader}>
-          <View>
-            <Text style={styles.sectionTitle}>
-              Baggage overview
-            </Text>
-            <Text style={styles.sectionSubtitle}>
-              Current recorded baggage status
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.statsContainer}>
-          <View style={styles.statCard}>
-            <View style={styles.statIconRegistered}>
-              <Text style={styles.statIconRegisteredText}>▣</Text>
-            </View>
-            <Text style={styles.statNumber}>{registeredCount}</Text>
-            <Text style={styles.statLabel}>Registered</Text>
-          </View>
-
-          <View style={styles.statCard}>
-            <View style={styles.statIconLoading}>
-              <Text style={styles.statIconLoadingText}>↗</Text>
-            </View>
-            <Text style={styles.statNumber}>{loadingCount}</Text>
-            <Text style={styles.statLabel}>Loading</Text>
-          </View>
-
-          <View style={styles.statCard}>
-            <View style={styles.statIconOffloaded}>
-              <Text style={styles.statIconOffloadedText}>✓</Text>
-            </View>
-            <Text style={styles.statNumber}>{offloadedCount}</Text>
-            <Text style={styles.statLabel}>Offloaded</Text>
-          </View>
-        </View>
-
-        {/* REGISTER BUTTON */}
-
-        <TouchableOpacity
-          style={styles.primaryButton}
-          onPress={() => setShowRegisterForm(true)}
-          activeOpacity={0.85}
+        {/* STATUS FILTERS */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.filterScroll}
+          contentContainerStyle={styles.filterContent}
         >
-          <Text style={styles.primaryButtonIcon}>＋</Text>
-          <Text style={styles.primaryButtonText}>
-            Register New Baggage
-          </Text>
-          <Text style={styles.buttonArrow}>›</Text>
-        </TouchableOpacity>
-
-        {/* REGISTERED BAGGAGE */}
-
-        <View style={styles.sectionHeader}>
-          <View>
-            <Text style={styles.sectionTitle}>
-              Registered Baggage
-            </Text>
-            <Text style={styles.sectionSubtitle}>
-              All baggage records in the system
-            </Text>
-          </View>
-
-          <View style={styles.countBadge}>
-            <Text style={styles.countBadgeText}>
-              {records.length}
-            </Text>
-          </View>
-        </View>
-
-        {loading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator
-              size="large"
-              color={AeroSyncColors.primary}
-            />
-            <Text style={styles.loadingText}>
-              Loading baggage records...
-            </Text>
-          </View>
-        ) : records.length === 0 ? (
-          <View style={styles.emptyCard}>
-            <View style={styles.emptyIcon}>
-              <Text style={styles.emptyIconText}>▣</Text>
-            </View>
-
-            <Text style={styles.emptyTitle}>
-              No baggage registered yet
-            </Text>
-
-            <Text style={styles.emptyDescription}>
-              New baggage registrations will appear here once
-              they have been added to AeroSync.
-            </Text>
-
-            <TouchableOpacity
-              style={styles.emptyButton}
-              onPress={() => setShowRegisterForm(true)}
+          {filters.map((filter) => (
+            <Pressable
+              key={filter}
+              onPress={() => setActiveFilter(filter)}
+              style={[
+                styles.filterChip,
+                activeFilter === filter && styles.filterChipActive,
+              ]}
             >
-              <Text style={styles.emptyButtonText}>
-                Register first baggage
+              <Text
+                style={[
+                  styles.filterText,
+                  activeFilter === filter && styles.filterTextActive,
+                ]}
+              >
+                {filter} ({counts[filter]})
               </Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <View style={styles.recordsContainer}>
-            {records.map((record) => {
-              const statusStyle = getStatusStyle(record.status);
+            </Pressable>
+          ))}
+        </ScrollView>
 
-              return (
-                <View key={record.id} style={styles.recordCard}>
-                  <View style={styles.recordTop}>
-                    <View style={styles.recordIcon}>
-                      <Text style={styles.recordIconText}>▣</Text>
+        {/* BAGGAGE REGISTER */}
+        <ScrollView
+          style={styles.list}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {loading ? (
+            <View style={styles.loadingState}>
+              <ActivityIndicator size="large" color={RED} />
+              <Text style={styles.emptyDescription}>
+                Loading baggage records...
+              </Text>
+            </View>
+          ) : filteredRecords.length === 0 ? (
+            <View style={styles.emptyState}>
+              <View style={styles.emptyIcon}>
+                <Text style={styles.emptyIconText}>▣</Text>
+              </View>
+
+              <Text style={styles.emptyTitle}>
+                {search ? 'No matching baggage' : 'No baggage records'}
+              </Text>
+
+              <Text style={styles.emptyDescription}>
+                {search
+                  ? 'Try searching with another bag tag or flight reference.'
+                  : 'Baggage registrations will appear here once recorded.'}
+              </Text>
+
+              {!search && (
+                <Pressable
+                  onPress={() => setShowRegisterForm(true)}
+                  style={styles.emptyButton}
+                >
+                  <Text style={styles.emptyButtonText}>
+                    Register baggage
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+          ) : (
+            <View style={styles.recordList}>
+              {filteredRecords.map((record, index) => {
+                const status = getStatusAppearance(record.status);
+
+                return (
+                  <View
+                    key={record.id}
+                    style={[
+                      styles.recordRow,
+                      index === filteredRecords.length - 1 &&
+                        styles.lastRecordRow,
+                    ]}
+                  >
+                    <View style={styles.bagIcon}>
+                      <Text style={styles.bagIconText}>▣</Text>
                     </View>
 
-                    <View style={styles.recordMain}>
+                    <View style={styles.recordInfo}>
                       <Text
-                        style={styles.recordBaggageId}
+                        style={styles.baggageId}
                         numberOfLines={1}
                       >
                         {record.baggageId || record.id}
                       </Text>
 
-                      <Text style={styles.recordFlight}>
-                        Flight: {record.flightId || '—'}
+                      <Text
+                        style={styles.flightReference}
+                        numberOfLines={1}
+                      >
+                        {record.flightId || 'Flight not assigned'}
+                        {record.baggageReference
+                          ? ` · ${record.baggageReference}`
+                          : ''}
                       </Text>
                     </View>
 
                     <View
                       style={[
                         styles.statusBadge,
-                        {
-                          backgroundColor: statusStyle.backgroundColor,
-                        },
+                        { backgroundColor: status.background },
                       ]}
                     >
-                      <View
-                        style={[
-                          styles.statusDot,
-                          { backgroundColor: statusStyle.color },
-                        ]}
-                      />
-
                       <Text
                         style={[
                           styles.statusText,
-                          { color: statusStyle.color },
+                          { color: status.color },
                         ]}
                       >
-                        {statusStyle.label}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.recordDivider} />
-
-                  <View style={styles.recordBottom}>
-                    <View>
-                      <Text style={styles.referenceLabel}>
-                        BAGGAGE REFERENCE
-                      </Text>
-
-                      <Text style={styles.recordReference}>
-                        {record.baggageReference || 'Not available'}
+                        {status.label}
                       </Text>
                     </View>
 
-                    <Text style={styles.recordArrow}>›</Text>
+                    <Text style={styles.chevron}>›</Text>
                   </View>
-                </View>
-              );
-            })}
-          </View>
-        )}
+                );
+              })}
+            </View>
+          )}
 
-        {/* FOOTER */}
+          <View style={styles.bottomSpace} />
+        </ScrollView>
 
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>
-            AEROSYNC · GROUND OPERATIONS
-          </Text>
-        </View>
-      </ScrollView>
-    </View>
+        {/* REGISTER ACTION */}
+        <Pressable
+          onPress={() => setShowRegisterForm(true)}
+          style={styles.registerButton}
+        >
+          <Text style={styles.registerButtonText}>＋ Register baggage</Text>
+        </Pressable>
+      </View>
+    </SafeAreaView>
   );
 }
 
-// --------------------------------------------------
-// STYLES - USING SHARED AEROSYNC THEME
-// --------------------------------------------------
-
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
-    backgroundColor: AeroSyncColors.background,
+    backgroundColor: BACKGROUND,
+  },
+  screen: {
+    flex: 1,
+    width: '100%',
+    maxWidth: 760,
+    alignSelf: 'center',
+    paddingHorizontal: 19,
   },
 
-  content: {
-    padding: AeroSyncSpacing.xl,
-    paddingBottom: AeroSyncSpacing.pageBottom,
-  },
-
-  // BRAND HEADER
-
-  topHeader: {
+  /* HEADER */
+  header: {
+    height: 62,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: AeroSyncSpacing.section,
+    gap: 13,
   },
-
-  brandSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: AeroSyncSpacing.md,
-  },
-
-  brandIcon: {
-    width: AeroSyncComponents.headerIconSize,
-    height: AeroSyncComponents.headerIconSize,
-    borderRadius: AeroSyncRadius.lg,
-    backgroundColor: AeroSyncColors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  brandIconText: {
-    fontSize: 29,
-    fontWeight: AeroSyncTypography.fontWeight.black,
-    color: AeroSyncColors.white,
-  },
-
-  brandName: {
-    fontSize: 22,
-    fontWeight: AeroSyncTypography.fontWeight.black,
-    color: AeroSyncColors.text,
-    letterSpacing: -0.8,
-  },
-
-  brandSubtitle: {
-    fontSize: AeroSyncTypography.fontSize.xs,
-    fontWeight: AeroSyncTypography.fontWeight.black,
-    color: AeroSyncColors.primaryDark,
-    letterSpacing: 0.8,
-    marginTop: 2,
-  },
-
-  liveBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: AeroSyncSpacing.xs + 2,
-    backgroundColor: AeroSyncColors.successLight,
-    paddingHorizontal: AeroSyncSpacing.md,
-    paddingVertical: AeroSyncSpacing.sm,
-    borderRadius: AeroSyncRadius.round,
-  },
-
-  liveDot: {
-    width: 7,
-    height: 7,
-    borderRadius: AeroSyncRadius.round,
-    backgroundColor: AeroSyncColors.success,
-  },
-
-  liveText: {
-    color: AeroSyncColors.success,
-    fontSize: 11,
-    fontWeight: AeroSyncTypography.fontWeight.black,
-    letterSpacing: 0.8,
-  },
-
-  // BACK BUTTON
-
   backButton: {
-    marginBottom: AeroSyncSpacing.lg,
+    width: 27,
+    height: 42,
+    justifyContent: 'center',
   },
-
-  backButtonText: {
-    color: AeroSyncColors.primaryDark,
-    fontSize: AeroSyncTypography.fontSize.md,
-    fontWeight: AeroSyncTypography.fontWeight.extrabold,
+  backIcon: {
+    color: DARK,
+    fontSize: 37,
+    lineHeight: 40,
+    fontWeight: '300',
   },
-
-  // PAGE HEADING
-
-  headingSection: {
-    marginBottom: AeroSyncSpacing.xxl,
-  },
-
-  eyebrow: {
-    color: AeroSyncColors.primaryDark,
-    fontSize: AeroSyncTypography.fontSize.xs,
-    fontWeight: AeroSyncTypography.fontWeight.black,
-    letterSpacing: 1.5,
-    marginBottom: AeroSyncSpacing.sm - 1,
-  },
-
-  title: {
-    fontSize: AeroSyncTypography.fontSize.title,
-    fontWeight: AeroSyncTypography.fontWeight.black,
-    color: AeroSyncColors.text,
-    letterSpacing: -1,
-    marginBottom: AeroSyncSpacing.sm - 1,
-  },
-
-  subtitle: {
-    fontSize: AeroSyncTypography.fontSize.md,
-    color: AeroSyncColors.textSecondary,
-    lineHeight: 22,
-  },
-
-  // HERO CARD
-
-  heroCard: {
-    backgroundColor: AeroSyncColors.primary,
-    borderRadius: AeroSyncRadius.xl,
-    padding: AeroSyncSpacing.xxl,
-    marginBottom: AeroSyncSpacing.section - 2,
-    overflow: 'hidden',
-  },
-
-  heroTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-
-  heroTextSection: {
+  heading: {
     flex: 1,
-    paddingRight: AeroSyncSpacing.md,
+    color: DARK,
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: -0.6,
+  },
+  qrButton: {
+    width: 39,
+    height: 39,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  qrIcon: {
+    color: DARK,
+    fontSize: 29,
+    fontWeight: '700',
   },
 
-  heroEyebrow: {
-    color: '#FFE0E4',
-    fontSize: AeroSyncTypography.fontSize.xs,
-    fontWeight: AeroSyncTypography.fontWeight.black,
-    letterSpacing: 1.4,
-    marginBottom: AeroSyncSpacing.md,
+  /* SEARCH */
+  searchBar: {
+    height: 46,
+    backgroundColor: '#EFF0F2',
+    borderRadius: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    marginTop: 7,
+    marginBottom: 20,
   },
-
-  heroTitle: {
-    color: AeroSyncColors.white,
+  searchIcon: {
+    color: DARK,
+    fontSize: 26,
+    marginRight: 9,
+  },
+  searchInput: {
+    flex: 1,
+    color: DARK,
+    fontSize: 12,
+    paddingVertical: 0,
+    outlineStyle: 'none',
+  } as any,
+  clearSearch: {
+    color: MUTED,
     fontSize: 23,
-    fontWeight: AeroSyncTypography.fontWeight.black,
-    lineHeight: 29,
-    marginBottom: AeroSyncSpacing.sm,
+    paddingHorizontal: 4,
   },
 
-  heroDescription: {
-    color: AeroSyncColors.white,
-    fontSize: 13,
-    lineHeight: 20,
+  /* FILTERS */
+  filterScroll: {
+    flexGrow: 0,
+    marginBottom: 14,
+    maxHeight: 45,
   },
-
-  heroIcon: {
-    width: 54,
-    height: 54,
-    borderRadius: AeroSyncRadius.round,
-    backgroundColor: 'rgba(255,255,255,0.20)',
+  filterContent: {
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 9,
+    paddingRight: 5,
   },
-
-  heroPlane: {
-    color: AeroSyncColors.white,
-    fontSize: 28,
-  },
-
-  heroDivider: {
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.35)',
-    marginTop: AeroSyncSpacing.xxl,
-    marginBottom: AeroSyncSpacing.lg,
-  },
-
-  totalSection: {
-    gap: AeroSyncSpacing.xs,
-  },
-
-  totalLabel: {
-    color: '#FFE0E4',
-    fontSize: AeroSyncTypography.fontSize.xs,
-    fontWeight: AeroSyncTypography.fontWeight.black,
-    letterSpacing: 1,
-  },
-
-  totalNumber: {
-    color: AeroSyncColors.white,
-    fontSize: 32,
-    fontWeight: AeroSyncTypography.fontWeight.black,
-  },
-
-  // SECTION HEADINGS
-
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: AeroSyncSpacing.md + 2,
-  },
-
-  sectionTitle: {
-    fontSize: AeroSyncTypography.fontSize.xl,
-    fontWeight: AeroSyncTypography.fontWeight.black,
-    color: AeroSyncColors.text,
-    letterSpacing: -0.5,
-  },
-
-  sectionSubtitle: {
-    fontSize: 13,
-    color: AeroSyncColors.textSecondary,
-    marginTop: AeroSyncSpacing.xs,
-  },
-
-  // STAT CARDS
-
-  statsContainer: {
-    flexDirection: 'row',
-    gap: AeroSyncSpacing.sm + 2,
-    marginBottom: AeroSyncSpacing.xxl,
-  },
-
-  statCard: {
-    flex: 1,
-    backgroundColor: AeroSyncColors.surface,
-    borderRadius: AeroSyncRadius.lg,
-    padding: AeroSyncSpacing.md,
+  filterChip: {
+    height: 37,
     borderWidth: 1,
-    borderColor: AeroSyncColors.border,
-  },
-
-  statIconRegistered: {
-    width: 34,
-    height: 34,
-    borderRadius: AeroSyncRadius.md - 1,
-    backgroundColor: AeroSyncColors.infoLight,
+    borderColor: BORDER,
+    borderRadius: 22,
+    paddingHorizontal: 15,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: AeroSyncSpacing.md,
+    backgroundColor: WHITE,
   },
-
-  statIconRegisteredText: {
-    fontSize: 19,
-    fontWeight: AeroSyncTypography.fontWeight.black,
-    color: AeroSyncColors.info,
+  filterChipActive: {
+    borderColor: RED,
+    backgroundColor: '#FCECEF',
   },
-
-  statIconLoading: {
-    width: 34,
-    height: 34,
-    borderRadius: AeroSyncRadius.md - 1,
-    backgroundColor: AeroSyncColors.warningLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: AeroSyncSpacing.md,
-  },
-
-  statIconLoadingText: {
-    fontSize: 19,
-    fontWeight: AeroSyncTypography.fontWeight.black,
-    color: AeroSyncColors.warning,
-  },
-
-  statIconOffloaded: {
-    width: 34,
-    height: 34,
-    borderRadius: AeroSyncRadius.md - 1,
-    backgroundColor: AeroSyncColors.successLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: AeroSyncSpacing.md,
-  },
-
-  statIconOffloadedText: {
-    fontSize: 19,
-    fontWeight: AeroSyncTypography.fontWeight.black,
-    color: AeroSyncColors.success,
-  },
-
-  statNumber: {
-    fontSize: 25,
-    fontWeight: AeroSyncTypography.fontWeight.black,
-    color: AeroSyncColors.text,
-  },
-
-  statLabel: {
+  filterText: {
+    color: DARK,
     fontSize: 11,
-    color: AeroSyncColors.textSecondary,
-    fontWeight: AeroSyncTypography.fontWeight.bold,
-    marginTop: AeroSyncSpacing.xs - 1,
+    fontWeight: '700',
+  },
+  filterTextActive: {
+    color: RED,
+    fontWeight: '900',
   },
 
-  // REGISTER BUTTON
-
-  primaryButton: {
-    height: AeroSyncComponents.buttonHeight + 4,
-    backgroundColor: AeroSyncColors.primary,
-    borderRadius: AeroSyncRadius.lg - 2,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: AeroSyncSpacing.lg,
-    marginBottom: AeroSyncSpacing.section,
-    ...AeroSyncShadows.button,
-  },
-
-  primaryButtonIcon: {
-    fontSize: 24,
-    fontWeight: AeroSyncTypography.fontWeight.bold,
-    color: AeroSyncColors.white,
-    marginRight: AeroSyncSpacing.sm,
-  },
-
-  primaryButtonText: {
-    fontSize: AeroSyncTypography.fontSize.md,
-    fontWeight: AeroSyncTypography.fontWeight.black,
-    color: AeroSyncColors.white,
-  },
-
-  buttonArrow: {
-    position: 'absolute',
-    right: AeroSyncSpacing.xl,
-    fontSize: 27,
-    color: AeroSyncColors.white,
-  },
-
-  // RECORD COUNT
-
-  countBadge: {
-    backgroundColor: AeroSyncColors.primaryLight,
-    minWidth: 34,
-    height: 34,
-    borderRadius: AeroSyncRadius.round,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: AeroSyncSpacing.sm,
-  },
-
-  countBadgeText: {
-    color: AeroSyncColors.primaryDark,
-    fontSize: 13,
-    fontWeight: AeroSyncTypography.fontWeight.black,
-  },
-
-  // RECORD LIST
-
-  recordsContainer: {
-    gap: AeroSyncSpacing.md,
-  },
-
-  recordCard: {
-    backgroundColor: AeroSyncColors.surface,
-    borderRadius: AeroSyncRadius.lg,
-    padding: AeroSyncSpacing.lg,
-    borderWidth: 1,
-    borderColor: AeroSyncColors.border,
-    ...AeroSyncShadows.card,
-  },
-
-  recordTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-
-  recordIcon: {
-    width: AeroSyncComponents.iconSize,
-    height: AeroSyncComponents.iconSize,
-    borderRadius: AeroSyncRadius.md + 1,
-    backgroundColor: AeroSyncColors.primaryLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: AeroSyncSpacing.md,
-  },
-
-  recordIconText: {
-    color: AeroSyncColors.primaryDark,
-    fontSize: 21,
-    fontWeight: AeroSyncTypography.fontWeight.black,
-  },
-
-  recordMain: {
+  /* LIST */
+  list: {
     flex: 1,
-    paddingRight: AeroSyncSpacing.sm,
   },
-
-  recordBaggageId: {
-    fontSize: AeroSyncTypography.fontSize.base,
-    fontWeight: AeroSyncTypography.fontWeight.black,
-    color: AeroSyncColors.text,
-    marginBottom: AeroSyncSpacing.xs,
+  listContent: {
+    paddingTop: 1,
+    paddingBottom: 20,
   },
-
-  recordFlight: {
-    fontSize: AeroSyncTypography.fontSize.sm,
-    color: AeroSyncColors.textSecondary,
+  recordList: {
+    backgroundColor: WHITE,
   },
-
-  statusBadge: {
+  recordRow: {
+    minHeight: 83,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: AeroSyncSpacing.sm + 1,
-    paddingVertical: AeroSyncSpacing.xs + 3,
-    borderRadius: AeroSyncRadius.round,
-    gap: AeroSyncSpacing.xs + 1,
+    gap: 11,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F1F2',
+    paddingVertical: 11,
   },
-
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: AeroSyncRadius.round,
+  lastRecordRow: {
+    borderBottomWidth: 0,
   },
-
-  statusText: {
-    fontSize: AeroSyncTypography.fontSize.xs,
-    fontWeight: AeroSyncTypography.fontWeight.black,
-  },
-
-  recordDivider: {
-    height: 1,
-    backgroundColor: AeroSyncColors.border,
-    marginVertical: AeroSyncSpacing.md + 1,
-  },
-
-  recordBottom: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-
-  referenceLabel: {
-    color: AeroSyncColors.textMuted,
-    fontSize: 9,
-    fontWeight: AeroSyncTypography.fontWeight.black,
-    letterSpacing: 0.8,
-    marginBottom: AeroSyncSpacing.xs + 1,
-  },
-
-  recordReference: {
-    color: '#555555',
-    fontSize: AeroSyncTypography.fontSize.sm,
-    fontWeight: AeroSyncTypography.fontWeight.semibold,
-  },
-
-  recordArrow: {
-    fontSize: 25,
-    color: AeroSyncColors.primaryDark,
-    fontWeight: AeroSyncTypography.fontWeight.semibold,
-  },
-
-  // EMPTY STATE
-
-  emptyCard: {
-    backgroundColor: AeroSyncColors.surface,
-    borderRadius: AeroSyncRadius.xl - 4,
-    padding: AeroSyncSpacing.xxl,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: AeroSyncColors.border,
-    ...AeroSyncShadows.card,
-  },
-
-  emptyIcon: {
-    width: 58,
-    height: 58,
-    borderRadius: AeroSyncRadius.lg + 2,
-    backgroundColor: AeroSyncColors.primaryLight,
+  bagIcon: {
+    width: 43,
+    height: 43,
+    borderRadius: 23,
+    backgroundColor: '#F1F2F3',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: AeroSyncSpacing.md + 2,
+  },
+  bagIconText: {
+    color: DARK,
+    fontSize: 23,
+    fontWeight: '700',
+  },
+  recordInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  baggageId: {
+    color: DARK,
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: -0.3,
+  },
+  flightReference: {
+    color: MUTED,
+    fontSize: 11,
+    marginTop: 5,
+  },
+  statusBadge: {
+    minWidth: 82,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statusText: {
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  chevron: {
+    color: '#555D65',
+    fontSize: 24,
+    fontWeight: '400',
+    marginLeft: 1,
   },
 
+  /* EMPTY AND LOADING STATES */
+  loadingState: {
+    minHeight: 170,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  emptyState: {
+    minHeight: 230,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 25,
+  },
+  emptyIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#FCECEF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 13,
+  },
   emptyIconText: {
-    color: AeroSyncColors.primaryDark,
-    fontSize: 27,
+    color: RED,
+    fontSize: 25,
   },
-
   emptyTitle: {
-    fontSize: 17,
-    fontWeight: AeroSyncTypography.fontWeight.black,
-    color: AeroSyncColors.text,
-    marginBottom: AeroSyncSpacing.sm,
+    color: DARK,
+    fontSize: 15,
+    fontWeight: '900',
   },
-
   emptyDescription: {
-    fontSize: 13,
-    color: AeroSyncColors.textSecondary,
-    lineHeight: 20,
+    color: MUTED,
+    fontSize: 11,
+    lineHeight: 17,
     textAlign: 'center',
-    marginBottom: AeroSyncSpacing.lg,
+    marginTop: 7,
   },
-
   emptyButton: {
-    backgroundColor: AeroSyncColors.primaryLight,
-    borderRadius: AeroSyncRadius.md - 2,
-    paddingHorizontal: AeroSyncSpacing.lg,
-    paddingVertical: AeroSyncSpacing.md,
+    marginTop: 16,
+    backgroundColor: '#FCECEF',
+    borderRadius: 20,
+    paddingHorizontal: 17,
+    paddingVertical: 10,
   },
-
   emptyButtonText: {
-    color: AeroSyncColors.primaryDark,
-    fontSize: 13,
-    fontWeight: AeroSyncTypography.fontWeight.black,
+    color: RED,
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  bottomSpace: {
+    height: 20,
   },
 
-  // LOADING
-
-  loadingContainer: {
-    backgroundColor: AeroSyncColors.surface,
-    borderRadius: AeroSyncRadius.lg,
-    padding: AeroSyncSpacing.xxl + 6,
-    alignItems: 'center',
-  },
-
-  loadingText: {
-    fontSize: 13,
-    color: AeroSyncColors.textSecondary,
-    marginTop: AeroSyncSpacing.md,
-  },
-
-  // FOOTER
-
-  footer: {
-    alignItems: 'center',
-    marginTop: AeroSyncSpacing.section + 5,
-    paddingBottom: AeroSyncSpacing.md,
-  },
-
-  footerText: {
-    fontSize: AeroSyncTypography.fontSize.xs,
-    color: AeroSyncColors.textMuted,
-    fontWeight: AeroSyncTypography.fontWeight.black,
-    letterSpacing: 1.2,
+  /* REGISTER ACTION */
+  registerButton: {
+  height: 45,
+  backgroundColor: RED,
+  borderRadius: 10,
+  alignItems: 'center',
+  justifyContent: 'center',
+  marginTop: 10,
+  marginBottom: 105,
+},
+  registerButtonText: {
+    color: WHITE,
+    fontSize: 12,
+    fontWeight: '900',
   },
 });

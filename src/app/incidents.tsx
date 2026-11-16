@@ -1,3 +1,4 @@
+
 import { auth, db } from '@/lib/firebase';
 import {
   addDoc,
@@ -10,12 +11,13 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
-import { useEffect, useState } from 'react';
-
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   Pressable,
+  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -23,21 +25,16 @@ import {
   View,
 } from 'react-native';
 
-// --------------------------------------------------
-// TYPES
-// --------------------------------------------------
-
 type ReportCategory = 'Incident' | 'Near Miss' | 'Hazard';
-
-type IncidentType =
-  | 'Baggage'
-  | 'Aircraft'
-  | 'Equipment'
-  | 'Safety'
-  | 'Other';
-
+type IncidentType = 'Baggage' | 'Aircraft' | 'Equipment' | 'Safety' | 'Other';
 type Severity = 'Low' | 'Medium' | 'High' | 'Critical';
-type ReportStatus = 'Open' | 'Under Investigation' | 'Resolved' | 'Closed';
+type ReportStatus =
+  | 'Open'
+  | 'Under Review'
+  | 'Under Investigation'
+  | 'Resolved'
+  | 'Closed';
+type FilterStatus = 'All' | 'Open' | 'In Review' | 'Closed';
 
 type Flight = {
   id: string;
@@ -64,30 +61,23 @@ type Incident = {
   injuryReported?: string;
   injuryDetails?: string;
   reportedBy: string;
-  reportedAt?: {
-    toDate?: () => Date;
-  } | null;
+  reportedAt?: { toDate?: () => Date } | null;
   status: string;
   supervisorNotes?: string;
   updatedBy?: string;
   updatedAt?: { toDate?: () => Date } | null;
 };
 
-// --------------------------------------------------
-// CONSTANTS
-// --------------------------------------------------
-
 const ADMIN_UID = '1IN8y6QDe4WyqGhMXXG3OzRtSWE3';
 
 const RED = '#C8102E';
-const DARK_RED = '#A20D25';
-const CHARCOAL = '#252525';
-const BACKGROUND = '#F4F3F3';
-const WHITE = '#FFFFFF';
+const DARK = '#252525';
 const MUTED = '#777777';
-const BORDER = '#E7E7E9';
-const PALE_RED = '#FCEBED';
+const BG = '#F5F5F6';
+const WHITE = '#FFFFFF';
+const BORDER = '#EAEAEA';
 const GREEN = '#16805C';
+const AMBER = '#A86B08';
 
 const REPORT_CATEGORIES: ReportCategory[] = [
   'Incident',
@@ -110,88 +100,160 @@ const SEVERITIES: Severity[] = [
   'Critical',
 ];
 
-const REPORT_STATUSES: ReportStatus[] = [
+const FILTERS: FilterStatus[] = [
+  'All',
   'Open',
-  'Under Investigation',
-  'Resolved',
+  'In Review',
   'Closed',
 ];
 
-// --------------------------------------------------
-// HELPER FUNCTIONS
-// --------------------------------------------------
-
-function formatReportedAt(
-  reportedAt?: { toDate?: () => Date } | null,
-) {
-  if (!reportedAt?.toDate) {
-    return 'Time unavailable';
-  }
+function getDate(value?: Incident['reportedAt']) {
+  if (!value?.toDate) return null;
 
   try {
-    return reportedAt.toDate().toLocaleString();
+    return value.toDate();
   } catch {
-    return 'Time unavailable';
+    return null;
   }
 }
 
-function getSeverityStyle(severity: string) {
-  switch (severity) {
-    case 'Critical':
-      return {
-        backgroundColor: '#FCE4E4',
-        color: '#B42318',
-      };
+function formatIncidentDate(value?: Incident['reportedAt']) {
+  const date = getDate(value);
+  if (!date) return 'Date unavailable';
 
-    case 'High':
-      return {
-        backgroundColor: '#FDEBEC',
-        color: RED,
-      };
+  const now = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(now.getDate() - 1);
 
-    case 'Medium':
-      return {
-        backgroundColor: '#FFF2DA',
-        color: '#A86B08',
-      };
+  const time = date.toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
 
+  if (date.toDateString() === now.toDateString()) {
+    return `Today, ${time}`;
+  }
+
+  if (date.toDateString() === yesterday.toDateString()) {
+    return `Yesterday, ${time}`;
+  }
+
+  return `${date.toLocaleDateString([], {
+    day: '2-digit',
+    month: 'short',
+  })}, ${time}`;
+}
+
+function formatFullDate(value?: Incident['reportedAt']) {
+  const date = getDate(value);
+  return date ? date.toLocaleString() : 'Not available';
+}
+
+function getSeverityColors(severity: string) {
+  switch (severity.toLowerCase()) {
+    case 'critical':
+    case 'high':
+      return { background: '#FCE8EB', text: RED };
+    case 'medium':
+      return { background: '#FFF2DA', text: AMBER };
     default:
-      return {
-        backgroundColor: '#E8F4ED',
-        color: GREEN,
-      };
+      return { background: '#EEEEF0', text: DARK };
   }
 }
 
-function getStatusStyle(status: string) {
+function getStatusColors(status: string) {
+  if (status === 'Resolved' || status === 'Closed') {
+    return { background: '#E8F4ED', text: GREEN };
+  }
+
+  if (
+    status === 'Under Review' ||
+    status === 'Under Investigation'
+  ) {
+    return { background: '#FFF2DA', text: AMBER };
+  }
+
+  return { background: '#FCE8EB', text: RED };
+}
+
+function getDisplayStatus(status: string) {
+  if (
+    status === 'Under Review' ||
+    status === 'Under Investigation'
+  ) {
+    return 'In Review';
+  }
+
+  return status;
+}
+
+function getIncidentIcon(incident: Incident) {
+  if (
+    incident.status === 'Resolved' ||
+    incident.status === 'Closed'
+  ) {
+    return { symbol: '✓', color: GREEN };
+  }
+
+  if (
+    incident.severity === 'Critical' ||
+    incident.severity === 'High'
+  ) {
+    return { symbol: '⚠', color: RED };
+  }
+
+  if (incident.severity === 'Medium') {
+    return { symbol: '⚠', color: AMBER };
+  }
+
+  return { symbol: '⚠', color: MUTED };
+}
+
+function getNextAction(status: string) {
   switch (status) {
-    case 'Resolved':
-    case 'Closed':
+    case 'Open':
       return {
-        backgroundColor: '#E8F4ED',
-        color: GREEN,
+        label: 'Start review',
+        nextStatus: 'Under Review' as const,
       };
 
+    case 'Under Review':
     case 'Under Investigation':
       return {
-        backgroundColor: '#FFF2DA',
-        color: '#A86B08',
+        label: 'Mark resolved',
+        nextStatus: 'Resolved' as const,
+      };
+
+    case 'Resolved':
+      return {
+        label: 'Close report',
+        nextStatus: 'Closed' as const,
+      };
+
+    case 'Closed':
+      return {
+        label: 'Reopen report',
+        nextStatus: 'Open' as const,
       };
 
     default:
-      return {
-        backgroundColor: PALE_RED,
-        color: RED,
-      };
+      return null;
   }
 }
 
-// --------------------------------------------------
-// MAIN SCREEN
-// --------------------------------------------------
+function getDisplayTitle(incident: Incident) {
+  const title =
+    incident.incidentType ||
+    incident.reportCategory ||
+    'Incident';
+
+  return incident.flightNumber
+    ? `${title} – ${incident.flightNumber}`
+    : title;
+}
 
 export default function IncidentsScreen() {
-  // Report form
   const [reportCategory, setReportCategory] =
     useState<ReportCategory>('Incident');
 
@@ -201,41 +263,28 @@ export default function IncidentsScreen() {
   const [selectedFlight, setSelectedFlight] =
     useState<Flight | null>(null);
 
-  const [flightPickerOpen, setFlightPickerOpen] =
-    useState(false);
-
+  const [flightPickerOpen, setFlightPickerOpen] = useState(false);
   const [flightSearch, setFlightSearch] = useState('');
 
   const [location, setLocation] = useState('');
   const [severity, setSeverity] = useState<Severity>('Low');
   const [description, setDescription] = useState('');
   const [immediateAction, setImmediateAction] = useState('');
-
   const [injuryReported, setInjuryReported] = useState('No');
   const [injuryDetails, setInjuryDetails] = useState('');
-
   const [saving, setSaving] = useState(false);
 
-  // Flights
   const [flights, setFlights] = useState<Flight[]>([]);
   const [loadingFlights, setLoadingFlights] = useState(true);
 
-  // Report history
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [loadingIncidents, setLoadingIncidents] = useState(true);
   const [incidentError, setIncidentError] = useState('');
 
-  // Supervisor management
   const [isSupervisor, setIsSupervisor] = useState(false);
-  const [categoryFilter, setCategoryFilter] = useState('All');
-  const [severityFilter, setSeverityFilter] = useState('All');
-  const [statusFilter, setStatusFilter] = useState('All');
-  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
-  const [updatingReportId, setUpdatingReportId] = useState<string | null>(null);
-
-  // --------------------------------------------------
-  // LOAD REPORTS ACCORDING TO USER ROLE
-  // --------------------------------------------------
+  const [filter, setFilter] = useState<FilterStatus>('All');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
 
   useEffect(() => {
     const user = auth.currentUser;
@@ -246,23 +295,22 @@ export default function IncidentsScreen() {
       return;
     }
 
-    let unsubscribeIncidents: (() => void) | undefined;
+    const userId = user.uid;
+    let unsubscribe: (() => void) | undefined;
     let cancelled = false;
 
-    async function startIncidentListener() {
+    async function startListener() {
       try {
-        const profileSnapshot = await getDoc(
-          doc(db, 'users', user.uid),
-        );
+        const profile = await getDoc(doc(db, 'users', userId));
 
         if (cancelled) return;
 
-        const role = profileSnapshot.exists()
-          ? profileSnapshot.data().role
+        const role = profile.exists()
+          ? profile.data().role
           : '';
 
         const supervisor =
-          user.uid === ADMIN_UID || role === 'supervisor';
+          userId === ADMIN_UID || role === 'supervisor';
 
         const handler = role === 'handler';
 
@@ -270,152 +318,121 @@ export default function IncidentsScreen() {
 
         if (!supervisor && !handler) {
           setIncidentError(
-            'Your account does not have permission to view reports.',
+            'Your account does not have permission to view reports.'
           );
-
           setLoadingIncidents(false);
           return;
         }
 
-        const incidentsCollection = collection(db, 'Incidents');
-
-        // Supervisors see all reports.
-        // Handlers see only reports they submitted.
-
-        const incidentsQuery = supervisor
-          ? query(incidentsCollection)
+        const reportsQuery = supervisor
+          ? query(collection(db, 'Incidents'))
           : query(
-              incidentsCollection,
-              where('reportedBy', '==', user.uid),
+              collection(db, 'Incidents'),
+              where('reportedBy', '==', userId)
             );
 
-        unsubscribeIncidents = onSnapshot(
-          incidentsQuery,
+        unsubscribe = onSnapshot(
+          reportsQuery,
+          (snapshot) => {
+            const loaded: Incident[] = snapshot.docs.map((item) => {
+              const data = item.data();
 
-          snapshot => {
-            const loadedIncidents: Incident[] =
-              snapshot.docs.map(incidentDoc => {
-                const data = incidentDoc.data();
-
-                return {
-                  id: incidentDoc.id,
-                  reportCategory: data.reportCategory,
-                  incidentType: data.incidentType ?? 'Other',
-                  flightId: data.flightId ?? '',
-                  flightNumber: data.flightNumber ?? '',
-                  flightRoute: data.flightRoute ?? '',
-                  location: data.location ?? '',
-                  severity: data.severity ?? 'Low',
-                  description: data.description ?? '',
-                  immediateAction: data.immediateAction ?? '',
-                  injuryReported: data.injuryReported ?? 'No',
-                  injuryDetails: data.injuryDetails ?? '',
-                  reportedBy: data.reportedBy ?? '',
-                  reportedAt: data.reportedAt,
-                  status: data.status ?? 'Open',
-                  supervisorNotes: data.supervisorNotes ?? '',
-                  updatedBy: data.updatedBy ?? '',
-                  updatedAt: data.updatedAt ?? null,
-                };
-              });
-
-            // Sort newest reports first.
-            loadedIncidents.sort((a, b) => {
-              const aTime =
-                a.reportedAt?.toDate?.().getTime() ?? 0;
-
-              const bTime =
-                b.reportedAt?.toDate?.().getTime() ?? 0;
-
-              return bTime - aTime;
+              return {
+                id: item.id,
+                reportCategory: data.reportCategory ?? 'Incident',
+                incidentType: data.incidentType ?? 'Other',
+                flightId: data.flightId ?? '',
+                flightNumber: data.flightNumber ?? '',
+                flightRoute: data.flightRoute ?? '',
+                location: data.location ?? '',
+                severity: data.severity ?? 'Low',
+                description: data.description ?? '',
+                immediateAction: data.immediateAction ?? '',
+                injuryReported: data.injuryReported ?? 'No',
+                injuryDetails: data.injuryDetails ?? '',
+                reportedBy: data.reportedBy ?? '',
+                reportedAt: data.reportedAt ?? null,
+                status: data.status ?? 'Open',
+                supervisorNotes: data.supervisorNotes ?? '',
+                updatedBy: data.updatedBy ?? '',
+                updatedAt: data.updatedAt ?? null,
+              };
             });
 
-            setIncidents(loadedIncidents);
+            loaded.sort(
+              (a, b) =>
+                (getDate(b.reportedAt)?.getTime() ?? 0) -
+                (getDate(a.reportedAt)?.getTime() ?? 0)
+            );
+
+            setIncidents(loaded);
             setIncidentError('');
             setLoadingIncidents(false);
           },
-
-          error => {
+          (error) => {
             console.error('INCIDENT LIST ERROR:', error);
-
             setIncidentError(
-              'Could not load reports. Check your connection and permissions.',
+              'Could not load reports. Check your connection and permissions.'
             );
-
             setLoadingIncidents(false);
-          },
+          }
         );
       } catch (error) {
-        console.error(
-          'Could not verify incident access:',
-          error,
-        );
+        console.error('Could not verify incident access:', error);
 
         if (!cancelled) {
           setIncidentError(
-            'Could not verify your account permissions.',
+            'Could not verify your account permissions.'
           );
-
           setLoadingIncidents(false);
         }
       }
     }
 
-    startIncidentListener();
+    startListener();
 
     return () => {
       cancelled = true;
-      unsubscribeIncidents?.();
+      unsubscribe?.();
     };
   }, []);
-
-  // --------------------------------------------------
-  // LOAD FLIGHTS
-  // --------------------------------------------------
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
       collection(db, 'Flights'),
+      (snapshot) => {
+        const loaded: Flight[] = snapshot.docs.map((item) => {
+          const data = item.data();
 
-      snapshot => {
-        const loadedFlights: Flight[] =
-          snapshot.docs.map(flightDoc => {
-            const data = flightDoc.data();
+          return {
+            id: item.id,
+            flightNumber: data.flightNumber ?? '',
+            origin: data.origin ?? '',
+            destination: data.destination ?? '',
+            departureDate: data.departureDate ?? '',
+            departureTime: data.departureTime ?? '',
+            status: data.status ?? 'Scheduled',
+            isDemo: data.isDemo ?? false,
+          };
+        });
 
-            return {
-              id: flightDoc.id,
-              flightNumber: data.flightNumber ?? '',
-              origin: data.origin ?? '',
-              destination: data.destination ?? '',
-              departureDate: data.departureDate ?? '',
-              departureTime: data.departureTime ?? '',
-              status: data.status ?? 'Scheduled',
-              isDemo: data.isDemo ?? false,
-            };
-          });
-
-        loadedFlights.sort((a, b) =>
+        loaded.sort((a, b) =>
           `${a.departureDate} ${a.departureTime}`.localeCompare(
-            `${b.departureDate} ${b.departureTime}`,
-          ),
+            `${b.departureDate} ${b.departureTime}`
+          )
         );
 
-        setFlights(loadedFlights);
+        setFlights(loaded);
         setLoadingFlights(false);
       },
-
-      error => {
+      (error) => {
         console.error('FLIGHT LIST ERROR:', error);
         setLoadingFlights(false);
-      },
+      }
     );
 
     return unsubscribe;
   }, []);
-
-  // --------------------------------------------------
-  // SUBMIT REPORT
-  // --------------------------------------------------
 
   async function submitIncident() {
     if (saving) return;
@@ -423,30 +440,24 @@ export default function IncidentsScreen() {
     if (!location.trim() || !description.trim()) {
       Alert.alert(
         'Missing information',
-        'Please enter the location and description.',
+        'Please enter the location and description.'
       );
-
       return;
     }
 
     if (!auth.currentUser) {
       Alert.alert(
         'Not signed in',
-        'Please sign in before submitting a report.',
+        'Please sign in before submitting a report.'
       );
-
       return;
     }
 
-    if (
-      injuryReported === 'Yes' &&
-      !injuryDetails.trim()
-    ) {
+    if (injuryReported === 'Yes' && !injuryDetails.trim()) {
       Alert.alert(
         'Missing injury details',
-        'Please briefly describe the reported injury.',
+        'Please briefly describe the reported injury.'
       );
-
       return;
     }
 
@@ -456,29 +467,18 @@ export default function IncidentsScreen() {
       await addDoc(collection(db, 'Incidents'), {
         reportCategory,
         incidentType,
-
-        // Link the report to the selected flight.
         flightId: selectedFlight?.id ?? '',
-
-        flightNumber:
-          selectedFlight?.flightNumber ?? '',
-
+        flightNumber: selectedFlight?.flightNumber ?? '',
         flightRoute: selectedFlight
           ? `${selectedFlight.origin} → ${selectedFlight.destination}`
           : '',
-
         location: location.trim(),
         severity,
         description: description.trim(),
         immediateAction: immediateAction.trim(),
-
         injuryReported,
-
         injuryDetails:
-          injuryReported === 'Yes'
-            ? injuryDetails.trim()
-            : '',
-
+          injuryReported === 'Yes' ? injuryDetails.trim() : '',
         reportedBy: auth.currentUser.uid,
         reportedAt: serverTimestamp(),
         status: 'Open',
@@ -486,10 +486,9 @@ export default function IncidentsScreen() {
 
       Alert.alert(
         'Report submitted',
-        'Your report has been successfully recorded.',
+        'Your report has been successfully recorded.'
       );
 
-      // Reset form.
       setReportCategory('Incident');
       setIncidentType('Baggage');
       setSelectedFlight(null);
@@ -502,124 +501,86 @@ export default function IncidentsScreen() {
       setInjuryReported('No');
       setInjuryDetails('');
     } catch (error) {
-      console.error(
-        'INCIDENT SUBMISSION ERROR:',
-        error,
-      );
+      console.error('INCIDENT SUBMISSION ERROR:', error);
 
       Alert.alert(
         'Submission failed',
-        'Could not submit your report. Check your connection and Firebase permissions.',
+        'Could not submit your report. Check your connection and Firebase permissions.'
       );
     } finally {
       setSaving(false);
     }
   }
 
-  // --------------------------------------------------
-  // SUPERVISOR REPORT MANAGEMENT
-  // --------------------------------------------------
-
-  async function updateIncident(
+  async function changeStatus(
     incident: Incident,
-    nextStatus: ReportStatus,
+    nextStatus: 'Open' | 'Under Review' | 'Resolved' | 'Closed'
   ) {
-    if (!isSupervisor || !auth.currentUser) {
-      Alert.alert(
-        'Not authorised',
-        'Only supervisors can manage reports.',
-      );
-      return;
-    }
+    if (!isSupervisor || !auth.currentUser || updatingId) return;
 
-    setUpdatingReportId(incident.id);
+    setUpdatingId(incident.id);
 
     try {
       await updateDoc(doc(db, 'Incidents', incident.id), {
         status: nextStatus,
-        supervisorNotes: (
-          noteDrafts[incident.id] ??
-          incident.supervisorNotes ??
-          ''
-        ).trim(),
-        updatedBy: auth.currentUser.uid,
-        updatedAt: serverTimestamp(),
+        statusUpdatedAt: serverTimestamp(),
+        statusUpdatedBy: auth.currentUser.uid,
       });
 
-      Alert.alert(
-        'Report updated',
-        `Status changed to ${nextStatus}.`,
-      );
+      setExpandedId(null);
     } catch (error) {
       console.error('INCIDENT UPDATE ERROR:', error);
 
       Alert.alert(
         'Update failed',
-        'Could not update this report. Check your connection and Firestore permissions.',
+        'Could not update this incident. Check your connection and permissions.'
       );
     } finally {
-      setUpdatingReportId(null);
+      setUpdatingId(null);
     }
   }
 
-  // --------------------------------------------------
-  // FILTER REPORTS
-  // --------------------------------------------------
-
-  const filteredIncidents = incidents.filter(incident =>
-    (categoryFilter === 'All' ||
-      (incident.reportCategory ?? 'Incident') === categoryFilter)
-    &&
-    (severityFilter === 'All' ||
-      incident.severity === severityFilter)
-    &&
-    (statusFilter === 'All' ||
-      incident.status === statusFilter),
+  const counts = useMemo(
+    () => ({
+      All: incidents.length,
+      Open: incidents.filter((item) => item.status === 'Open').length,
+      'In Review': incidents.filter(
+        (item) =>
+          item.status === 'Under Review' ||
+          item.status === 'Under Investigation'
+      ).length,
+      Closed: incidents.filter(
+        (item) =>
+          item.status === 'Resolved' || item.status === 'Closed'
+      ).length,
+    }),
+    [incidents]
   );
 
-  // --------------------------------------------------
-  // OPTION BUTTONS
-  // --------------------------------------------------
+  const filteredIncidents = useMemo(() => {
+    if (filter === 'Open') {
+      return incidents.filter((item) => item.status === 'Open');
+    }
 
-  function renderOptions<T extends string>(
-    options: T[],
-    selected: T,
-    onSelect: (value: T) => void,
-  ) {
-    return (
-      <View style={styles.optionRow}>
-        {options.map(option => {
-          const isSelected = selected === option;
+    if (filter === 'In Review') {
+      return incidents.filter(
+        (item) =>
+          item.status === 'Under Review' ||
+          item.status === 'Under Investigation'
+      );
+    }
 
-          return (
-            <Pressable
-              key={option}
-              style={[
-                styles.option,
-                isSelected && styles.optionSelected,
-              ]}
-              onPress={() => onSelect(option)}
-            >
-              <Text
-                style={[
-                  styles.optionText,
-                  isSelected && styles.optionTextSelected,
-                ]}
-              >
-                {option}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
-    );
-  }
+    if (filter === 'Closed') {
+      return incidents.filter(
+        (item) =>
+          item.status === 'Resolved' || item.status === 'Closed'
+      );
+    }
 
-  // --------------------------------------------------
-  // FILTER FLIGHTS
-  // --------------------------------------------------
+    return incidents;
+  }, [incidents, filter]);
 
-  const filteredFlights = flights.filter(flight => {
+  const filteredFlights = flights.filter((flight) => {
     const search = flightSearch.trim().toLowerCase();
 
     if (!search) return true;
@@ -628,186 +589,373 @@ export default function IncidentsScreen() {
       flight.flightNumber,
       flight.origin,
       flight.destination,
-    ].some(value =>
-      value.toLowerCase().includes(search),
-    );
+    ].some((value) => value.toLowerCase().includes(search));
   });
 
-  // --------------------------------------------------
-  // SCREEN UI
-  // --------------------------------------------------
-
-  return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
-      showsVerticalScrollIndicator={false}
-    >
-      {/* HEADER */}
-
-      <View style={styles.header}>
-        <View style={styles.brandMark}>
-          <Text style={styles.brandMarkText}>A</Text>
-        </View>
-
-        <View style={styles.brandText}>
-          <Text style={styles.brandName}>AeroSync</Text>
-
-          <Text style={styles.brandSubtitle}>
-            GROUND OPERATIONS
-          </Text>
-        </View>
+  function renderOptions<T extends string>(
+    options: T[],
+    selected: T,
+    onSelect: (value: T) => void
+  ) {
+    return (
+      <View style={styles.optionRow}>
+        {options.map((option) => (
+          <Pressable
+            key={option}
+            style={[
+              styles.option,
+              selected === option && styles.optionSelected,
+            ]}
+            onPress={() => onSelect(option)}
+          >
+            <Text
+              style={[
+                styles.optionText,
+                selected === option && styles.optionTextSelected,
+              ]}
+            >
+              {option}
+            </Text>
+          </Pressable>
+        ))}
       </View>
+    );
+  }
 
-      {/* PAGE HEADING */}
+  function renderFilter(status: FilterStatus) {
+    const selected = filter === status;
 
-      <View style={styles.headingSection}>
-        <Text style={styles.title}>
-          Safety Reporting
-        </Text>
-
-        <Text style={styles.subtitle}>
-          Record incidents, near misses and workplace hazards.
-          Your reports help improve ground-handling safety.
-        </Text>
-      </View>
-
-      {/* REPORT FORM */}
-
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>
-          Submit a Report
-        </Text>
-
-        <Text style={styles.label}>
-          Report Category *
-        </Text>
-
-        {renderOptions(
-          REPORT_CATEGORIES,
-          reportCategory,
-          setReportCategory,
-        )}
-
-        <Text style={styles.label}>
-          Report Type *
-        </Text>
-
-        {renderOptions(
-          INCIDENT_TYPES,
-          incidentType,
-          setIncidentType,
-        )}
-
-        {/* FLIGHT SELECTOR */}
-
-        <Text style={styles.label}>
-          Flight Involved
-          <Text style={styles.optional}>
-            {' '}(Optional)
-          </Text>
-        </Text>
-
-        <Pressable
-          style={styles.flightSelector}
-          onPress={() =>
-            setFlightPickerOpen(!flightPickerOpen)
-          }
+    return (
+      <Pressable
+        key={status}
+        onPress={() => {
+          setFilter(status);
+          setExpandedId(null);
+        }}
+        style={[
+          styles.filterButton,
+          selected && styles.filterButtonSelected,
+        ]}
+      >
+        <Text
+          style={[
+            styles.filterText,
+            selected && styles.filterTextSelected,
+          ]}
+          numberOfLines={1}
         >
-          <View style={{ flex: 1 }}>
-            {selectedFlight ? (
-              <>
-                <Text style={styles.selectedFlightNumber}>
-                  {selectedFlight.flightNumber}
-                  {selectedFlight.isDemo ? ' · DEMO' : ''}
-                </Text>
+          {status} ({counts[status]})
+        </Text>
+      </Pressable>
+    );
+  }
 
-                <Text style={styles.selectedFlightRoute}>
-                  {selectedFlight.origin} → {selectedFlight.destination}
-                </Text>
+  function renderIncident({ item }: { item: Incident }) {
+    const expanded = expandedId === item.id;
+    const severityColors = getSeverityColors(item.severity);
+    const icon = getIncidentIcon(item);
+    const nextAction = getNextAction(item.status);
+    const updating = updatingId === item.id;
 
-                <Text style={styles.selectedFlightMeta}>
-                  {selectedFlight.departureDate} at{' '}
-                  {selectedFlight.departureTime}
-                </Text>
-              </>
-            ) : (
-              <Text style={styles.flightPlaceholder}>
-                {loadingFlights
-                  ? 'Loading flights...'
-                  : 'Select a flight (optional)'}
-              </Text>
-            )}
+    return (
+      <View style={styles.incidentItem}>
+        <Pressable
+          style={styles.incidentRow}
+          onPress={() => setExpandedId(expanded ? null : item.id)}
+        >
+          <View
+            style={[
+              styles.incidentIcon,
+              { borderColor: icon.color },
+            ]}
+          >
+            <Text
+              style={[
+                styles.incidentIconText,
+                { color: icon.color },
+              ]}
+            >
+              {icon.symbol}
+            </Text>
           </View>
 
-          <Text style={styles.flightChevron}>
-            {flightPickerOpen ? '▲' : '▼'}
+          <View style={styles.incidentInfo}>
+            <Text style={styles.incidentTitle} numberOfLines={1}>
+              {getDisplayTitle(item)}
+            </Text>
+
+            <Text style={styles.incidentSubtitle} numberOfLines={1}>
+              {getDisplayStatus(item.status)} ·{' '}
+              {formatIncidentDate(item.reportedAt)}
+            </Text>
+          </View>
+
+          <View
+            style={[
+              styles.severityBadge,
+              { backgroundColor: severityColors.background },
+            ]}
+          >
+            <Text
+              style={[
+                styles.severityText,
+                { color: severityColors.text },
+              ]}
+            >
+              {item.severity}
+            </Text>
+          </View>
+
+          <Text style={styles.chevron}>
+            {expanded ? '⌄' : '›'}
           </Text>
         </Pressable>
 
-        {selectedFlight ? (
-          <Pressable
-            onPress={() => setSelectedFlight(null)}
-            style={styles.clearFlightButton}
-          >
-            <Text style={styles.clearFlightText}>
-              Remove selected flight
-            </Text>
-          </Pressable>
-        ) : null}
-
-        {/* FLIGHT SEARCH DROPDOWN */}
-
-        {flightPickerOpen ? (
-          <View style={styles.flightPicker}>
-            <TextInput
-              style={styles.input}
-              placeholder="Search flight number or route..."
-              placeholderTextColor="#999999"
-              value={flightSearch}
-              onChangeText={setFlightSearch}
-              autoCapitalize="characters"
+        {expanded && (
+          <View style={styles.details}>
+            <Detail
+              label="INCIDENT TYPE"
+              value={item.incidentType}
             />
 
+            <Detail
+              label="REPORT CATEGORY"
+              value={item.reportCategory ?? 'Incident'}
+            />
+
+            {!!item.flightNumber && (
+              <Detail
+                label="FLIGHT"
+                value={`${item.flightNumber}${
+                  item.flightRoute ? ` · ${item.flightRoute}` : ''
+                }`}
+              />
+            )}
+
+            <Detail
+              label="LOCATION"
+              value={item.location || 'Not specified'}
+            />
+
+            <Detail
+              label="DESCRIPTION"
+              value={item.description || 'No description provided.'}
+            />
+
+            {!!item.immediateAction && (
+              <Detail
+                label="IMMEDIATE ACTION TAKEN"
+                value={item.immediateAction}
+              />
+            )}
+
+            <Detail
+              label="INJURY REPORTED"
+              value={
+                item.injuryReported === 'Yes' && item.injuryDetails
+                  ? `Yes – ${item.injuryDetails}`
+                  : item.injuryReported || 'No'
+              }
+            />
+
+            <Detail
+              label="DATE REPORTED"
+              value={formatFullDate(item.reportedAt)}
+            />
+
+            <Detail
+              label="CURRENT STATUS"
+              value={getDisplayStatus(item.status)}
+            />
+
+            {!!item.supervisorNotes && (
+              <Detail
+                label="SUPERVISOR NOTES"
+                value={item.supervisorNotes}
+              />
+            )}
+
+            {isSupervisor && nextAction && (
+              <Pressable
+                style={[
+                  styles.updateButton,
+                  updating && styles.disabledButton,
+                ]}
+                disabled={!!updatingId}
+                onPress={() =>
+                  changeStatus(item, nextAction.nextStatus)
+                }
+              >
+                {updating ? (
+                  <ActivityIndicator color={WHITE} />
+                ) : (
+                  <Text style={styles.updateButtonText}>
+                    {nextAction.label}
+                  </Text>
+                )}
+              </Pressable>
+            )}
+          </View>
+        )}
+      </View>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <ScrollView
+        style={styles.page}
+        contentContainerStyle={styles.pageContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Brand header */}
+        <View style={styles.brandHeader}>
+          <View style={styles.brandMark}>
+            <Text style={styles.brandMarkText}>K</Text>
+          </View>
+
+          <View>
+            <Text style={styles.brandName}>AeroSync</Text>
+            <Text style={styles.brandSubtitle}>
+              GROUND CREW · HANDLER
+            </Text>
+          </View>
+        </View>
+
+        {/* Page heading */}
+        <View style={styles.pageHeading}>
+          <View style={styles.headingText}>
+            <Text style={styles.heading}>Incidents</Text>
+            <Text style={styles.subheading}>
+              Safety reports and incident history
+            </Text>
+          </View>
+
+          <View style={styles.totalBadge}>
+            <Text style={styles.totalNumber}>{incidents.length}</Text>
+            <Text style={styles.totalLabel}>REPORTS</Text>
+          </View>
+        </View>
+
+        {/* Report form */}
+        <View style={styles.formCard}>
+          <Text style={styles.sectionHeading}>Submit a Report</Text>
+          <Text style={styles.sectionHint}>
+            Record an incident, near miss or workplace hazard.
+          </Text>
+
+          <Text style={styles.label}>Report Category *</Text>
+          {renderOptions(
+            REPORT_CATEGORIES,
+            reportCategory,
+            setReportCategory
+          )}
+
+          <Text style={styles.label}>Report Type *</Text>
+          {renderOptions(
+            INCIDENT_TYPES,
+            incidentType,
+            setIncidentType
+          )}
+
+          <Text style={styles.label}>
+            Flight Involved{' '}
+            <Text style={styles.optional}>(Optional)</Text>
+          </Text>
+
+          <Pressable
+            style={styles.flightSelector}
+            onPress={() => setFlightPickerOpen(!flightPickerOpen)}
+          >
+            <View style={{ flex: 1 }}>
+              {selectedFlight ? (
+                <>
+                  <Text style={styles.selectedFlightNumber}>
+                    {selectedFlight.flightNumber}
+                    {selectedFlight.isDemo ? ' · DEMO' : ''}
+                  </Text>
+
+                  <Text style={styles.selectedFlightRoute}>
+                    {selectedFlight.origin} →{' '}
+                    {selectedFlight.destination}
+                  </Text>
+
+                  <Text style={styles.selectedFlightMeta}>
+                    {selectedFlight.departureDate} at{' '}
+                    {selectedFlight.departureTime}
+                  </Text>
+                </>
+              ) : (
+                <Text style={styles.flightPlaceholder}>
+                  {loadingFlights
+                    ? 'Loading flights...'
+                    : 'Select a flight (optional)'}
+                </Text>
+              )}
+            </View>
+
+            <Text style={styles.flightChevron}>
+              {flightPickerOpen ? '▲' : '▼'}
+            </Text>
+          </Pressable>
+
+          {selectedFlight && (
             <Pressable
-              style={styles.noFlightOption}
-              onPress={() => {
-                setSelectedFlight(null);
-                setFlightPickerOpen(false);
-                setFlightSearch('');
-              }}
+              onPress={() => setSelectedFlight(null)}
+              style={styles.clearFlightButton}
             >
-              <Text style={styles.noFlightText}>
-                Not linked to a specific flight
+              <Text style={styles.clearFlightText}>
+                Remove selected flight
               </Text>
             </Pressable>
+          )}
 
-            {loadingFlights ? (
-              <ActivityIndicator
-                color={RED}
-                style={{ padding: 14 }}
+          {flightPickerOpen && (
+            <View style={styles.flightPicker}>
+              <TextInput
+                style={styles.input}
+                placeholder="Search flight number or route..."
+                placeholderTextColor="#999999"
+                value={flightSearch}
+                onChangeText={setFlightSearch}
+                autoCapitalize="characters"
               />
-            ) : filteredFlights.length === 0 ? (
-              <Text style={styles.noFlightsText}>
-                No matching flights found.
-              </Text>
-            ) : (
-              <ScrollView
-                style={styles.flightOptionsList}
-                nestedScrollEnabled
+
+              <Pressable
+                style={styles.noFlightOption}
+                onPress={() => {
+                  setSelectedFlight(null);
+                  setFlightPickerOpen(false);
+                  setFlightSearch('');
+                }}
               >
-                {filteredFlights.map(flight => (
-                  <Pressable
-                    key={flight.id}
-                    style={styles.flightOption}
-                    onPress={() => {
-                      setSelectedFlight(flight);
-                      setFlightPickerOpen(false);
-                      setFlightSearch('');
-                    }}
-                  >
-                    <View style={{ flex: 1 }}>
+                <Text style={styles.clearFlightText}>
+                  Not linked to a specific flight
+                </Text>
+              </Pressable>
+
+              {loadingFlights ? (
+                <ActivityIndicator
+                  color={RED}
+                  style={{ padding: 14 }}
+                />
+              ) : filteredFlights.length === 0 ? (
+                <Text style={styles.noFlightsText}>
+                  No matching flights found.
+                </Text>
+              ) : (
+                <View style={styles.flightOptionsList}>
+                  {filteredFlights.map((flight) => (
+                    <Pressable
+                      key={flight.id}
+                      style={styles.flightOption}
+                      onPress={() => {
+                        setSelectedFlight(flight);
+                        setFlightPickerOpen(false);
+                        setFlightSearch('');
+                      }}
+                    >
                       <Text style={styles.flightOptionNumber}>
                         {flight.flightNumber}
                         {flight.isDemo ? ' · DEMO' : ''}
@@ -818,499 +966,204 @@ export default function IncidentsScreen() {
                       </Text>
 
                       <Text style={styles.flightOptionMeta}>
-                        {flight.departureDate} · {flight.departureTime} · {flight.status}
+                        {flight.departureDate} ·{' '}
+                        {flight.departureTime} · {flight.status}
                       </Text>
-                    </View>
-                  </Pressable>
-                ))}
-              </ScrollView>
-            )}
-          </View>
-        ) : null}
-
-        {/* LOCATION */}
-
-        <Text style={styles.label}>
-          Location *
-        </Text>
-
-        <TextInput
-          style={styles.input}
-          placeholder="e.g. Stand 12, Baggage Hall"
-          placeholderTextColor="#999999"
-          value={location}
-          onChangeText={setLocation}
-        />
-
-        {/* SEVERITY */}
-
-        <Text style={styles.label}>
-          Severity *
-        </Text>
-
-        {renderOptions(
-          SEVERITIES,
-          severity,
-          setSeverity,
-        )}
-
-        {/* DESCRIPTION */}
-
-        <Text style={styles.label}>
-          Description *
-        </Text>
-
-        <TextInput
-          style={[styles.input, styles.textArea]}
-          placeholder="Describe what happened or what you observed..."
-          placeholderTextColor="#999999"
-          value={description}
-          onChangeText={setDescription}
-          multiline
-          textAlignVertical="top"
-        />
-
-        {/* IMMEDIATE ACTION */}
-
-        <Text style={styles.label}>
-          Immediate Action Taken
-        </Text>
-
-        <TextInput
-          style={[styles.input, styles.textArea]}
-          placeholder="What action was taken immediately?"
-          placeholderTextColor="#999999"
-          value={immediateAction}
-          onChangeText={setImmediateAction}
-          multiline
-          textAlignVertical="top"
-        />
-
-        {/* INJURY */}
-
-        <Text style={styles.label}>
-          Was anyone injured?
-        </Text>
-
-        {renderOptions(
-          ['Yes', 'No'],
-          injuryReported,
-          setInjuryReported,
-        )}
-
-        {injuryReported === 'Yes' && (
-          <>
-            <Text style={styles.label}>
-              Injury Details *
-            </Text>
-
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              placeholder="Briefly describe the injury..."
-              placeholderTextColor="#999999"
-              value={injuryDetails}
-              onChangeText={setInjuryDetails}
-              multiline
-              textAlignVertical="top"
-            />
-          </>
-        )}
-
-        {/* NOTE */}
-
-        <View style={styles.noteBox}>
-          <Text style={styles.noteTitle}>
-            Before submitting
-          </Text>
-
-          <Text style={styles.noteText}>
-            Provide accurate details. If immediate assistance is
-            needed, follow your airport's emergency and safety
-            reporting procedures.
-          </Text>
-        </View>
-
-        {/* SUBMIT */}
-
-        <Pressable
-          style={[
-            styles.submitButton,
-            saving && styles.submitButtonDisabled,
-          ]}
-          onPress={submitIncident}
-          disabled={saving}
-        >
-          {saving ? (
-            <ActivityIndicator color={WHITE} />
-          ) : (
-            <Text style={styles.submitButtonText}>
-              Submit Report
-            </Text>
-          )}
-        </Pressable>
-      </View>
-
-      {/* REPORT HISTORY */}
-
-      <View style={styles.recentHeader}>
-        <View>
-          <Text style={styles.sectionTitle}>
-            Report History
-          </Text>
-
-          <Text style={styles.recentSubtitle}>
-            Recent reports from AeroSync
-          </Text>
-        </View>
-
-        <View style={styles.countBadge}>
-          <Text style={styles.countText}>
-            {isSupervisor ? filteredIncidents.length : incidents.length}
-          </Text>
-        </View>
-      </View>
-
-      {/* SUPERVISOR FILTERS */}
-
-      {isSupervisor ? (
-        <View style={styles.filterCard}>
-          <Text style={styles.filterHeading}>
-            Filter Reports
-          </Text>
-
-          <Text style={styles.filterLabel}>
-            Category
-          </Text>
-
-          {renderOptions(
-            ['All', ...REPORT_CATEGORIES],
-            categoryFilter,
-            setCategoryFilter,
-          )}
-
-          <Text style={styles.filterLabel}>
-            Severity
-          </Text>
-
-          {renderOptions(
-            ['All', ...SEVERITIES],
-            severityFilter,
-            setSeverityFilter,
-          )}
-
-          <Text style={styles.filterLabel}>
-            Status
-          </Text>
-
-          {renderOptions(
-            ['All', ...REPORT_STATUSES],
-            statusFilter,
-            setStatusFilter,
-          )}
-        </View>
-      ) : null}
-
-      {loadingIncidents ? (
-        <View style={styles.messageCard}>
-          <ActivityIndicator color={RED} />
-
-          <Text style={styles.messageText}>
-            Loading reports...
-          </Text>
-        </View>
-      ) : incidentError ? (
-        <View style={styles.messageCard}>
-          <Text style={styles.errorText}>
-            {incidentError}
-          </Text>
-        </View>
-      ) : filteredIncidents.length === 0 ? (
-        <View style={styles.messageCard}>
-          <Text style={styles.emptyTitle}>
-            No reports yet
-          </Text>
-
-          <Text style={styles.messageText}>
-            {incidents.length === 0
-              ? 'Submitted reports will appear here.'
-              : 'No reports match the selected filters.'}
-          </Text>
-        </View>
-      ) : (
-        filteredIncidents.map(incident => {
-          const severityStyle = getSeverityStyle(
-            incident.severity,
-          );
-
-          const statusStyle = getStatusStyle(
-            incident.status,
-          );
-
-          const currentStatus = REPORT_STATUSES.includes(
-            incident.status as ReportStatus,
-          )
-            ? incident.status as ReportStatus
-            : 'Open';
-
-          return (
-            <View
-              key={incident.id}
-              style={styles.incidentCard}
-            >
-              <View style={styles.incidentHeader}>
-                <View style={styles.incidentTitleArea}>
-                  <Text style={styles.incidentType}>
-                    {incident.reportCategory ?? 'Incident'}
-                  </Text>
-
-                  <Text style={styles.incidentSubType}>
-                    {incident.incidentType}
-                  </Text>
+                    </Pressable>
+                  ))}
                 </View>
-
-                <View
-                  style={[
-                    styles.badge,
-                    {
-                      backgroundColor:
-                        severityStyle.backgroundColor,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.badgeText,
-                      { color: severityStyle.color },
-                    ]}
-                  >
-                    {incident.severity}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.divider} />
-
-              {/* LINKED FLIGHT */}
-
-              {incident.flightNumber ? (
-                <View style={styles.detailRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.detailLabel}>
-                      Flight
-                    </Text>
-
-                    <Text style={styles.detailValue}>
-                      {incident.flightNumber}
-                    </Text>
-
-                    {incident.flightRoute ? (
-                      <Text style={styles.flightHistoryRoute}>
-                        {incident.flightRoute}
-                      </Text>
-                    ) : null}
-                  </View>
-                </View>
-              ) : null}
-
-              {/* LOCATION */}
-
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>
-                  Location
-                </Text>
-
-                <Text style={styles.detailValue}>
-                  {incident.location}
-                </Text>
-              </View>
-
-              {/* STATUS */}
-
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>
-                  Status
-                </Text>
-
-                <View
-                  style={[
-                    styles.badge,
-                    {
-                      backgroundColor:
-                        statusStyle.backgroundColor,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.badgeText,
-                      { color: statusStyle.color },
-                    ]}
-                  >
-                    {incident.status}
-                  </Text>
-                </View>
-              </View>
-
-              {/* DESCRIPTION */}
-
-              <Text style={styles.descriptionLabel}>
-                Description
-              </Text>
-
-              <Text style={styles.description}>
-                {incident.description}
-              </Text>
-
-              {/* IMMEDIATE ACTION */}
-
-              {incident.immediateAction ? (
-                <>
-                  <Text style={styles.descriptionLabel}>
-                    Immediate Action
-                  </Text>
-
-                  <Text style={styles.description}>
-                    {incident.immediateAction}
-                  </Text>
-                </>
-              ) : null}
-
-              {/* INJURY DETAILS */}
-
-              {incident.injuryReported === 'Yes' ? (
-                <>
-                  <Text style={styles.descriptionLabel}>
-                    Injury Reported
-                  </Text>
-
-                  <Text style={styles.description}>
-                    {incident.injuryDetails ||
-                      'Details not provided'}
-                  </Text>
-                </>
-              ) : null}
-
-              {/* SUPERVISOR MANAGEMENT */}
-
-              {isSupervisor ? (
-                <View style={styles.managementPanel}>
-                  <Text style={styles.managementTitle}>
-                    Supervisor Management
-                  </Text>
-
-                  <Text style={styles.filterLabel}>
-                    Update Status
-                  </Text>
-
-                  {renderOptions(
-                    REPORT_STATUSES,
-                    currentStatus,
-                    value => updateIncident(incident, value),
-                  )}
-
-                  <Text style={styles.filterLabel}>
-                    Investigation / Resolution Notes
-                  </Text>
-
-                  <TextInput
-                    style={[styles.input, styles.textArea]}
-                    placeholder="Record findings, action taken or resolution..."
-                    placeholderTextColor="#999999"
-                    value={
-                      noteDrafts[incident.id] ??
-                      incident.supervisorNotes ??
-                      ''
-                    }
-                    onChangeText={value =>
-                      setNoteDrafts(current => ({
-                        ...current,
-                        [incident.id]: value,
-                      }))
-                    }
-                    multiline
-                    textAlignVertical="top"
-                  />
-
-                  <Pressable
-                    style={[
-                      styles.saveManagementButton,
-                      updatingReportId === incident.id &&
-                        styles.submitButtonDisabled,
-                    ]}
-                    onPress={() =>
-                      updateIncident(incident, currentStatus)
-                    }
-                    disabled={updatingReportId === incident.id}
-                  >
-                    {updatingReportId === incident.id ? (
-                      <ActivityIndicator color={WHITE} />
-                    ) : (
-                      <Text style={styles.submitButtonText}>
-                        Save Notes
-                      </Text>
-                    )}
-                  </Pressable>
-
-                  {incident.updatedAt ? (
-                    <Text style={styles.reportedAt}>
-                      Last updated {formatReportedAt(incident.updatedAt)}
-                    </Text>
-                  ) : null}
-                </View>
-              ) : incident.supervisorNotes ? (
-                <>
-                  <Text style={styles.descriptionLabel}>
-                    Supervisor Notes
-                  </Text>
-
-                  <Text style={styles.description}>
-                    {incident.supervisorNotes}
-                  </Text>
-                </>
-              ) : null}
-
-              <Text style={styles.reportedAt}>
-                Reported {formatReportedAt(incident.reportedAt)}
-              </Text>
+              )}
             </View>
-          );
-        })
-      )}
+          )}
 
-      <Text style={styles.footer}>
-        AeroSync · Ground Operations
-      </Text>
-    </ScrollView>
+          <Text style={styles.label}>Location *</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="e.g. Stand 12, Baggage Hall"
+            placeholderTextColor="#999999"
+            value={location}
+            onChangeText={setLocation}
+          />
+
+          <Text style={styles.label}>Severity *</Text>
+          {renderOptions(SEVERITIES, severity, setSeverity)}
+
+          <Text style={styles.label}>Description *</Text>
+          <TextInput
+            style={[styles.input, styles.textArea]}
+            placeholder="Describe what happened or what you observed..."
+            placeholderTextColor="#999999"
+            value={description}
+            onChangeText={setDescription}
+            multiline
+            textAlignVertical="top"
+          />
+
+          <Text style={styles.label}>Immediate Action Taken</Text>
+          <TextInput
+            style={[styles.input, styles.textArea]}
+            placeholder="What action was taken immediately?"
+            placeholderTextColor="#999999"
+            value={immediateAction}
+            onChangeText={setImmediateAction}
+            multiline
+            textAlignVertical="top"
+          />
+
+          <Text style={styles.label}>Was anyone injured?</Text>
+          {renderOptions(
+            ['Yes', 'No'],
+            injuryReported,
+            setInjuryReported
+          )}
+
+          {injuryReported === 'Yes' && (
+            <>
+              <Text style={styles.label}>Injury Details *</Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                placeholder="Briefly describe the injury..."
+                placeholderTextColor="#999999"
+                value={injuryDetails}
+                onChangeText={setInjuryDetails}
+                multiline
+                textAlignVertical="top"
+              />
+            </>
+          )}
+
+          <View style={styles.noteBox}>
+            <Text style={styles.noteTitle}>Before submitting</Text>
+            <Text style={styles.noteText}>
+              Provide accurate details. If immediate assistance is
+              needed, follow your airport's emergency and safety
+              reporting procedures.
+            </Text>
+          </View>
+
+          <Pressable
+            style={[
+              styles.submitButton,
+              saving && styles.disabledButton,
+            ]}
+            onPress={submitIncident}
+            disabled={saving}
+          >
+            {saving ? (
+              <ActivityIndicator color={WHITE} />
+            ) : (
+              <Text style={styles.submitButtonText}>
+                Submit Report
+              </Text>
+            )}
+          </Pressable>
+        </View>
+
+        {/* Report history */}
+        <View style={styles.historyHeader}>
+          <View>
+            <Text style={styles.sectionHeading}>Report History</Text>
+            <Text style={styles.sectionHint}>
+              Tap a report to view its details
+            </Text>
+          </View>
+
+          <Text style={styles.historyCount}>
+            {filteredIncidents.length}
+          </Text>
+        </View>
+
+        <View style={styles.filters}>
+          {FILTERS.map(renderFilter)}
+        </View>
+
+        {loadingIncidents ? (
+          <View style={styles.messageContainer}>
+            <ActivityIndicator color={RED} />
+            <Text style={styles.messageText}>
+              Loading incidents...
+            </Text>
+          </View>
+        ) : incidentError ? (
+          <View style={styles.messageContainer}>
+            <Text style={styles.errorText}>{incidentError}</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={filteredIncidents}
+            keyExtractor={(item) => item.id}
+            renderItem={renderIncident}
+            scrollEnabled={false}
+            contentContainerStyle={styles.listContent}
+            ListEmptyComponent={
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyTitle}>
+                  No incidents found
+                </Text>
+
+                <Text style={styles.messageText}>
+                  {incidents.length === 0
+                    ? 'Submitted reports will appear here.'
+                    : 'There are no reports in this category.'}
+                </Text>
+              </View>
+            }
+          />
+        )}
+
+        <Text style={styles.footer}>
+          AeroSync · Ground Operations
+        </Text>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
-// --------------------------------------------------
-// STYLES
-// --------------------------------------------------
+function Detail({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <View style={styles.detailRow}>
+      <Text style={styles.detailLabel}>{label}</Text>
+      <Text style={styles.detailValue}>{value}</Text>
+    </View>
+  );
+}
 
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
-    backgroundColor: BACKGROUND,
+    backgroundColor: BG,
   },
 
-  content: {
-    padding: 20,
-    paddingBottom: 45,
-    gap: 16,
+  page: {
+    flex: 1,
+    backgroundColor: BG,
   },
 
-  header: {
+  pageContent: {
+    paddingBottom: 145,
+  },
+
+  brandHeader: {
+    minHeight: 76,
+    backgroundColor: WHITE,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 11,
-    marginBottom: 4,
+    paddingHorizontal: 16,
+    gap: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
   },
 
   brandMark: {
-    width: 44,
-    height: 44,
-    borderRadius: 13,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     backgroundColor: RED,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1322,61 +1175,96 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
 
-  brandText: {
-    gap: 3,
-  },
-
   brandName: {
-    fontSize: 19,
+    color: DARK,
+    fontSize: 21,
     fontWeight: '900',
-    color: CHARCOAL,
   },
 
   brandSubtitle: {
-    fontSize: 9,
+    color: MUTED,
+    fontSize: 10,
     fontWeight: '800',
-    letterSpacing: 1.2,
-    color: MUTED,
+    letterSpacing: 1,
   },
 
-  headingSection: {
-    gap: 6,
-    marginBottom: 4,
-  },
-
-  title: {
-    fontSize: 27,
-    fontWeight: '900',
-    color: CHARCOAL,
-  },
-
-  subtitle: {
-    fontSize: 14,
-    lineHeight: 21,
-    color: MUTED,
-  },
-
-  card: {
+  pageHeading: {
     backgroundColor: WHITE,
-    borderRadius: 17,
-    padding: 18,
+    paddingHorizontal: 17,
+    paddingVertical: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+    gap: 10,
+  },
+
+  headingText: {
+    flex: 1,
+    minWidth: 0,
+  },
+
+  heading: {
+    color: DARK,
+    fontSize: 25,
+    fontWeight: '900',
+  },
+
+  subheading: {
+    color: MUTED,
+    fontSize: 12,
+    marginTop: 3,
+  },
+
+  totalBadge: {
+    backgroundColor: '#FCEBED',
+    minWidth: 60,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+
+  totalNumber: {
+    color: RED,
+    fontSize: 19,
+    fontWeight: '900',
+  },
+
+  totalLabel: {
+    color: RED,
+    fontSize: 9,
+    fontWeight: '900',
+  },
+
+  formCard: {
+    backgroundColor: WHITE,
+    marginHorizontal: 10,
+    padding: 15,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: BORDER,
   },
 
-  sectionTitle: {
-    fontSize: 19,
+  sectionHeading: {
+    color: DARK,
+    fontSize: 17,
     fontWeight: '900',
-    color: CHARCOAL,
-    marginBottom: 12,
+  },
+
+  sectionHint: {
+    color: MUTED,
+    fontSize: 11,
+    marginTop: 3,
+    lineHeight: 17,
   },
 
   label: {
-    fontSize: 13,
+    color: DARK,
+    fontSize: 12,
     fontWeight: '800',
-    color: CHARCOAL,
-    marginTop: 17,
-    marginBottom: 9,
+    marginTop: 15,
+    marginBottom: 7,
   },
 
   optional: {
@@ -1387,88 +1275,89 @@ const styles = StyleSheet.create({
   optionRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 7,
   },
 
   option: {
     borderWidth: 1,
     borderColor: BORDER,
-    borderRadius: 10,
-    paddingVertical: 10,
+    borderRadius: 20,
+    paddingVertical: 9,
     paddingHorizontal: 13,
     backgroundColor: WHITE,
   },
 
   optionSelected: {
-    backgroundColor: RED,
     borderColor: RED,
+    backgroundColor: '#FFF5F6',
   },
 
   optionText: {
-    fontSize: 12,
+    color: DARK,
+    fontSize: 11,
     fontWeight: '700',
-    color: CHARCOAL,
   },
 
   optionTextSelected: {
-    color: WHITE,
+    color: RED,
+    fontWeight: '900',
   },
 
   input: {
+    minHeight: 45,
     borderWidth: 1,
     borderColor: BORDER,
-    borderRadius: 11,
+    borderRadius: 9,
     backgroundColor: WHITE,
-    paddingHorizontal: 13,
-    paddingVertical: 12,
-    fontSize: 14,
-    color: CHARCOAL,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 13,
+    color: DARK,
   },
 
   textArea: {
-    minHeight: 95,
+    minHeight: 88,
     paddingTop: 12,
   },
 
   flightSelector: {
+    minHeight: 48,
     borderWidth: 1,
     borderColor: BORDER,
-    borderRadius: 11,
+    borderRadius: 9,
     backgroundColor: WHITE,
-    paddingHorizontal: 13,
-    paddingVertical: 13,
+    padding: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
   },
 
   flightPlaceholder: {
-    color: '#999999',
-    fontSize: 14,
+    color: MUTED,
+    fontSize: 13,
   },
 
   flightChevron: {
     color: RED,
-    fontSize: 12,
     fontWeight: '900',
+    fontSize: 12,
   },
 
   selectedFlightNumber: {
-    color: CHARCOAL,
-    fontSize: 14,
+    color: DARK,
+    fontSize: 13,
     fontWeight: '900',
   },
 
   selectedFlightRoute: {
     color: MUTED,
-    fontSize: 12,
-    marginTop: 3,
+    fontSize: 11,
+    marginTop: 2,
   },
 
   selectedFlightMeta: {
     color: MUTED,
     fontSize: 10,
-    marginTop: 3,
+    marginTop: 2,
   },
 
   clearFlightButton: {
@@ -1485,307 +1374,299 @@ const styles = StyleSheet.create({
   flightPicker: {
     borderWidth: 1,
     borderColor: BORDER,
-    borderRadius: 12,
-    padding: 10,
-    marginTop: 8,
+    borderRadius: 9,
+    padding: 9,
+    marginTop: 7,
     backgroundColor: '#FAFAFA',
   },
 
   noFlightOption: {
-    paddingVertical: 12,
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: BORDER,
-  },
-
-  noFlightText: {
-    color: RED,
-    fontSize: 12,
-    fontWeight: '800',
   },
 
   noFlightsText: {
     color: MUTED,
     fontSize: 12,
     textAlign: 'center',
-    padding: 15,
+    padding: 12,
   },
 
   flightOptionsList: {
-    maxHeight: 230,
+    maxHeight: 210,
   },
 
   flightOption: {
-    paddingVertical: 12,
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: BORDER,
-    flexDirection: 'row',
   },
 
   flightOptionNumber: {
-    color: CHARCOAL,
-    fontSize: 13,
+    color: DARK,
+    fontSize: 12,
     fontWeight: '900',
   },
 
   flightOptionRoute: {
     color: MUTED,
-    fontSize: 12,
-    marginTop: 3,
+    fontSize: 11,
+    marginTop: 2,
   },
 
   flightOptionMeta: {
-    color: MUTED,
-    fontSize: 10,
-    marginTop: 3,
-  },
-
-  flightHistoryRoute: {
     color: MUTED,
     fontSize: 10,
     marginTop: 2,
   },
 
   noteBox: {
-    backgroundColor: '#F8F7F7',
-    borderRadius: 11,
-    padding: 13,
-    marginTop: 20,
+    backgroundColor: '#F5F5F6',
+    borderRadius: 9,
+    padding: 12,
+    marginTop: 17,
   },
 
   noteTitle: {
-    color: CHARCOAL,
-    fontWeight: '800',
-    fontSize: 13,
-    marginBottom: 5,
+    color: DARK,
+    fontWeight: '900',
+    fontSize: 12,
+    marginBottom: 4,
   },
 
   noteText: {
     color: MUTED,
-    fontSize: 12,
-    lineHeight: 18,
+    fontSize: 11,
+    lineHeight: 17,
   },
 
   submitButton: {
     backgroundColor: RED,
-    borderRadius: 12,
-    paddingVertical: 15,
+    borderRadius: 9,
+    minHeight: 46,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 20,
-  },
-
-  submitButtonDisabled: {
-    backgroundColor: DARK_RED,
-    opacity: 0.7,
+    marginTop: 16,
   },
 
   submitButtonText: {
     color: WHITE,
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '900',
   },
 
-  recentHeader: {
+  disabledButton: {
+    opacity: 0.55,
+  },
+
+  historyHeader: {
+    marginHorizontal: 16,
+    marginTop: 22,
+    marginBottom: 10,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 8,
   },
 
-  recentSubtitle: {
-    fontSize: 12,
-    color: MUTED,
-    marginTop: -6,
-  },
-
-  countBadge: {
-    minWidth: 37,
-    height: 37,
-    borderRadius: 19,
-    backgroundColor: PALE_RED,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  countText: {
+  historyCount: {
     color: RED,
+    backgroundColor: '#FCEBED',
+    borderRadius: 18,
+    minWidth: 34,
+    textAlign: 'center',
+    overflow: 'hidden',
+    paddingVertical: 7,
+    fontSize: 13,
     fontWeight: '900',
-    fontSize: 14,
   },
 
-  filterCard: {
+  filters: {
+    flexDirection: 'row',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     backgroundColor: WHITE,
-    borderRadius: 14,
-    padding: 15,
-    borderWidth: 1,
-    borderColor: BORDER,
-    gap: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
   },
 
-  filterHeading: {
-    fontSize: 15,
-    fontWeight: '900',
-    color: CHARCOAL,
-  },
-
-  filterLabel: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: CHARCOAL,
-    marginTop: 8,
-    marginBottom: 5,
-  },
-
-  managementPanel: {
-    backgroundColor: '#FAF7F7',
-    borderRadius: 12,
-    padding: 13,
-    marginTop: 16,
-    borderWidth: 1,
-    borderColor: BORDER,
-  },
-
-  managementTitle: {
-    fontSize: 14,
-    fontWeight: '900',
-    color: CHARCOAL,
-    marginBottom: 5,
-  },
-
-  saveManagementButton: {
-    backgroundColor: RED,
-    borderRadius: 10,
-    paddingVertical: 12,
+  filterButton: {
+    flex: 1,
+    minWidth: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 12,
-  },
-
-  messageCard: {
-    backgroundColor: WHITE,
-    borderRadius: 14,
-    padding: 23,
-    alignItems: 'center',
-    gap: 9,
     borderWidth: 1,
     borderColor: BORDER,
+    backgroundColor: WHITE,
+    borderRadius: 20,
+    paddingHorizontal: 3,
+    paddingVertical: 9,
   },
 
-  messageText: {
-    fontSize: 13,
-    color: MUTED,
+  filterButtonSelected: {
+    borderColor: RED,
+    backgroundColor: '#FFF5F6',
+  },
+
+  filterText: {
+    color: DARK,
+    fontSize: 10,
+    fontWeight: '700',
     textAlign: 'center',
   },
 
-  emptyTitle: {
-    fontSize: 16,
+  filterTextSelected: {
+    color: RED,
     fontWeight: '900',
-    color: CHARCOAL,
+  },
+
+  listContent: {
+    paddingHorizontal: 12,
+    paddingBottom: 10,
+  },
+
+  incidentItem: {
+    backgroundColor: WHITE,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
+  },
+
+  incidentRow: {
+    minHeight: 72,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    gap: 9,
+  },
+
+  incidentIcon: {
+    width: 35,
+    height: 35,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  incidentIconText: {
+    fontSize: 19,
+    fontWeight: '900',
+  },
+
+  incidentInfo: {
+    flex: 1,
+    minWidth: 0,
+    gap: 4,
+  },
+
+  incidentTitle: {
+    color: DARK,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+
+  incidentSubtitle: {
+    color: MUTED,
+    fontSize: 10,
+  },
+
+  severityBadge: {
+    minWidth: 58,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 18,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+
+  severityText: {
+    fontSize: 10,
+    fontWeight: '900',
+  },
+
+  chevron: {
+    color: DARK,
+    fontSize: 24,
+    paddingLeft: 1,
+  },
+
+  details: {
+    paddingHorizontal: 48,
+    paddingTop: 4,
+    paddingBottom: 14,
+    gap: 10,
+  },
+
+  detailRow: {
+    gap: 3,
+  },
+
+  detailLabel: {
+    color: MUTED,
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.6,
+  },
+
+  detailValue: {
+    color: DARK,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+
+  updateButton: {
+    minHeight: 42,
+    backgroundColor: RED,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 5,
+  },
+
+  updateButtonText: {
+    color: WHITE,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+
+  messageContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 25,
+    gap: 10,
+  },
+
+  messageText: {
+    color: MUTED,
+    fontSize: 12,
+    textAlign: 'center',
+    lineHeight: 18,
   },
 
   errorText: {
     color: RED,
-    fontSize: 13,
+    fontSize: 12,
     textAlign: 'center',
   },
 
-  incidentCard: {
-    backgroundColor: WHITE,
-    borderRadius: 15,
-    padding: 16,
-    marginBottom: 1,
-    borderWidth: 1,
-    borderColor: BORDER,
-  },
-
-  incidentHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-
-  incidentTitleArea: {
-    flex: 1,
-    paddingRight: 10,
-  },
-
-  incidentType: {
-    fontSize: 17,
-    fontWeight: '900',
-    color: CHARCOAL,
-  },
-
-  incidentSubType: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: RED,
-    marginTop: 3,
-  },
-
-  badge: {
-    borderRadius: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 9,
-    alignSelf: 'flex-start',
-  },
-
-  badgeText: {
-    fontSize: 11,
-    fontWeight: '900',
-  },
-
-  divider: {
-    height: 1,
-    backgroundColor: BORDER,
-    marginVertical: 13,
-  },
-
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  emptyState: {
     alignItems: 'center',
-    marginBottom: 10,
+    paddingVertical: 35,
+    gap: 7,
   },
 
-  detailLabel: {
-    fontSize: 12,
-    color: MUTED,
-    fontWeight: '600',
-  },
-
-  detailValue: {
-    flex: 1,
-    textAlign: 'right',
-    marginLeft: 12,
-    fontSize: 12,
-    color: CHARCOAL,
-    fontWeight: '800',
-  },
-
-  descriptionLabel: {
-    fontSize: 12,
+  emptyTitle: {
+    color: DARK,
+    fontSize: 15,
     fontWeight: '900',
-    color: CHARCOAL,
-    marginTop: 9,
-    marginBottom: 4,
-  },
-
-  description: {
-    fontSize: 13,
-    lineHeight: 19,
-    color: '#555555',
-  },
-
-  reportedAt: {
-    fontSize: 10,
-    color: MUTED,
-    marginTop: 14,
   },
 
   footer: {
-    fontSize: 11,
     color: MUTED,
+    fontSize: 10,
     textAlign: 'center',
-    marginTop: 8,
+    marginTop: 18,
+    marginBottom: 8,
   },
 });

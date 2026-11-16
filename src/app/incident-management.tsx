@@ -1,23 +1,25 @@
+
 import { auth, db } from '@/lib/firebase';
 import {
-    collection,
-    doc,
-    getDoc,
-    onSnapshot,
-    orderBy,
-    query,
-    serverTimestamp,
-    updateDoc,
+  collection,
+  doc,
+  getDoc,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  updateDoc,
 } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -46,63 +48,103 @@ type Incident = {
   status: string;
 };
 
-type FilterStatus =
-  | 'All'
-  | IncidentStatus;
+type FilterStatus = 'All' | 'Open' | 'In Review' | 'Closed';
 
 const ADMIN_UID = '1IN8y6QDe4WyqGhMXXG3OzRtSWE3';
 
 const RED = '#C8102E';
-const DARK_RED = '#A20D25';
-const BACKGROUND = '#F4F3F3';
-const WHITE = '#FFFFFF';
-const TEXT = '#252525';
+const DARK = '#252525';
 const MUTED = '#777777';
-const BORDER = '#E7E7E9';
+const BG = '#F5F5F6';
+const WHITE = '#FFFFFF';
+const BORDER = '#EAEAEA';
 const GREEN = '#16805C';
 const AMBER = '#A86B08';
 
 const FILTERS: FilterStatus[] = [
   'All',
   'Open',
-  'Under Review',
-  'Resolved',
+  'In Review',
   'Closed',
 ];
 
-function formatDate(value?: { toDate?: () => Date } | null) {
-  if (!value?.toDate) return 'Time unavailable';
+function getDate(value?: Incident['reportedAt']): Date | null {
+  if (!value?.toDate) return null;
 
   try {
-    return value.toDate().toLocaleString();
+    return value.toDate();
   } catch {
-    return 'Time unavailable';
+    return null;
   }
+}
+
+function formatIncidentDate(value?: Incident['reportedAt']) {
+  const date = getDate(value);
+  if (!date) return 'Date unavailable';
+
+  const now = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(now.getDate() - 1);
+
+  const time = date.toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+
+  if (date.toDateString() === now.toDateString()) {
+    return `Today, ${time}`;
+  }
+
+  if (date.toDateString() === yesterday.toDateString()) {
+    return `Yesterday, ${time}`;
+  }
+
+  return `${date.toLocaleDateString([], {
+    day: '2-digit',
+    month: 'short',
+  })}, ${time}`;
+}
+
+function formatFullDate(value?: Incident['reportedAt']) {
+  const date = getDate(value);
+  return date ? date.toLocaleString() : 'Not available';
 }
 
 function getSeverityColors(severity: string) {
-  switch (severity) {
-    case 'Critical':
-      return { background: '#FCE4E4', text: '#B42318' };
-    case 'High':
-      return { background: '#FDEBEC', text: RED };
-    case 'Medium':
+  switch (severity.toLowerCase()) {
+    case 'critical':
+    case 'high':
+      return { background: '#FCE8EB', text: RED };
+
+    case 'medium':
       return { background: '#FFF2DA', text: AMBER };
+
     default:
-      return { background: '#E8F4ED', text: GREEN };
+      return { background: '#EEEEF0', text: DARK };
   }
 }
 
-function getStatusColors(status: string) {
-  switch (status) {
-    case 'Resolved':
-    case 'Closed':
-      return { background: '#E8F4ED', text: GREEN };
-    case 'Under Review':
-      return { background: '#FFF2DA', text: AMBER };
-    default:
-      return { background: '#FCEBED', text: RED };
+function getIncidentIcon(incident: Incident) {
+  if (
+    incident.status === 'Resolved' ||
+    incident.status === 'Closed'
+  ) {
+    return { symbol: '✓', color: GREEN };
   }
+
+  if (
+    incident.severity === 'Critical' ||
+    incident.severity === 'High'
+  ) {
+    return { symbol: '⚠', color: RED };
+  }
+
+  if (incident.severity === 'Medium') {
+    return { symbol: '⚠', color: AMBER };
+  }
+
+  return { symbol: '⚠', color: MUTED };
 }
 
 function getNextAction(status: string) {
@@ -136,6 +178,17 @@ function getNextAction(status: string) {
   }
 }
 
+function getDisplayTitle(incident: Incident) {
+  const title =
+    incident.incidentType ||
+    incident.reportCategory ||
+    'Incident';
+
+  return incident.flightNumber
+    ? `${title} – ${incident.flightNumber}`
+    : title;
+}
+
 export default function IncidentManagementScreen({
   onBack,
 }: {
@@ -145,6 +198,7 @@ export default function IncidentManagementScreen({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<FilterStatus>('All');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -156,13 +210,13 @@ export default function IncidentManagementScreen({
       return;
     }
 
-    let unsubscribeIncidents: (() => void) | undefined;
     let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
 
     async function verifySupervisorAndLoad() {
       try {
         const profileSnapshot = await getDoc(
-          doc(db, 'users', user.uid),
+          doc(db, 'users', user!.uid)
         );
 
         if (cancelled) return;
@@ -172,11 +226,11 @@ export default function IncidentManagementScreen({
           : '';
 
         const isSupervisor =
-          user.uid === ADMIN_UID || role === 'supervisor';
+          user!.uid === ADMIN_UID || role === 'supervisor';
 
         if (!isSupervisor) {
           setError(
-            'Only authorised supervisors can manage incidents.',
+            'Only authorised supervisors can manage incidents.'
           );
           setLoading(false);
           return;
@@ -184,13 +238,15 @@ export default function IncidentManagementScreen({
 
         const incidentsQuery = query(
           collection(db, 'Incidents'),
-          orderBy('reportedAt', 'desc'),
+          orderBy('reportedAt', 'desc')
         );
 
-        unsubscribeIncidents = onSnapshot(
+        unsubscribe = onSnapshot(
           incidentsQuery,
-          snapshot => {
-            const loaded: Incident[] = snapshot.docs.map(item => {
+          (snapshot) => {
+            if (cancelled) return;
+
+            const loaded: Incident[] = snapshot.docs.map((item) => {
               const data = item.data();
 
               return {
@@ -215,21 +271,18 @@ export default function IncidentManagementScreen({
             setError('');
             setLoading(false);
           },
-          snapshotError => {
-            console.error(
-              'Could not load incidents:',
-              snapshotError,
-            );
+          (snapshotError) => {
+            console.error('Could not load incidents:', snapshotError);
             setError(
-              'Could not load incident reports. Check your connection and Firebase permissions.',
+              'Could not load incident reports. Check your connection and Firebase permissions.'
             );
             setLoading(false);
-          },
+          }
         );
       } catch (verificationError) {
         console.error(
           'Supervisor verification failed:',
-          verificationError,
+          verificationError
         );
 
         if (!cancelled) {
@@ -243,42 +296,63 @@ export default function IncidentManagementScreen({
 
     return () => {
       cancelled = true;
-      unsubscribeIncidents?.();
+      unsubscribe?.();
     };
   }, []);
 
-  const filteredIncidents = useMemo(() => {
-    if (filter === 'All') return incidents;
+  const counts = useMemo(() => ({
+    All: incidents.length,
+    Open: incidents.filter((item) => item.status === 'Open').length,
+    'In Review': incidents.filter(
+      (item) => item.status === 'Under Review'
+    ).length,
+    Closed: incidents.filter(
+      (item) =>
+        item.status === 'Resolved' ||
+        item.status === 'Closed'
+    ).length,
+  }), [incidents]);
 
-    return incidents.filter(
-      incident => incident.status === filter,
-    );
+  const filteredIncidents = useMemo(() => {
+    switch (filter) {
+      case 'Open':
+        return incidents.filter((item) => item.status === 'Open');
+
+      case 'In Review':
+        return incidents.filter(
+          (item) => item.status === 'Under Review'
+        );
+
+      case 'Closed':
+        return incidents.filter(
+          (item) =>
+            item.status === 'Resolved' ||
+            item.status === 'Closed'
+        );
+
+      default:
+        return incidents;
+    }
   }, [incidents, filter]);
 
-  const openCount = incidents.filter(
-    item => item.status === 'Open',
-  ).length;
-
-  const reviewCount = incidents.filter(
-    item => item.status === 'Under Review',
-  ).length;
-
-  const resolvedCount = incidents.filter(
-    item =>
-      item.status === 'Resolved' ||
-      item.status === 'Closed',
-  ).length;
+  function showMessage(title: string, message: string) {
+    if (Platform.OS === 'web') {
+      window.alert(`${title}\n\n${message}`);
+    } else {
+      Alert.alert(title, message);
+    }
+  }
 
   async function changeStatus(
     incident: Incident,
-    nextStatus: IncidentStatus,
+    nextStatus: IncidentStatus
   ) {
     if (updatingId) return;
 
     const user = auth.currentUser;
 
     if (!user) {
-      Alert.alert('Not signed in', 'Please sign in again.');
+      showMessage('Not signed in', 'Please sign in again.');
       return;
     }
 
@@ -291,42 +365,51 @@ export default function IncidentManagementScreen({
             ? 'Reopen this incident for further attention?'
             : 'Move this report into review?';
 
-    Alert.alert(
-      `Change status to ${nextStatus}?`,
-      confirmationMessage,
-      [
+    const confirmUpdate = async () => {
+      setUpdatingId(incident.id);
+
+      try {
+        await updateDoc(
+          doc(db, 'Incidents', incident.id),
+          {
+            status: nextStatus,
+            statusUpdatedAt: serverTimestamp(),
+            statusUpdatedBy: user.uid,
+          }
+        );
+
+        setExpandedId(null);
+      } catch (updateError) {
+        console.error(
+          'Incident status update failed:',
+          updateError
+        );
+
+        showMessage(
+          'Update failed',
+          'The incident status could not be changed. Check your connection and Firebase permissions.'
+        );
+      } finally {
+        setUpdatingId(null);
+      }
+    };
+
+    const message =
+      `Change status to ${nextStatus}?\n\n${confirmationMessage}`;
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(message)) {
+        await confirmUpdate();
+      }
+    } else {
+      Alert.alert(`Change status to ${nextStatus}?`, confirmationMessage, [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Confirm',
-          onPress: async () => {
-            setUpdatingId(incident.id);
-
-            try {
-              await updateDoc(
-                doc(db, 'Incidents', incident.id),
-                {
-                  status: nextStatus,
-                  statusUpdatedAt: serverTimestamp(),
-                  statusUpdatedBy: user.uid,
-                },
-              );
-            } catch (updateError) {
-              console.error(
-                'Incident status update failed:',
-                updateError,
-              );
-
-              Alert.alert(
-                'Update failed',
-                'The incident status could not be changed. Check your connection and Firebase permissions.',
-              );
-            } finally {
-              setUpdatingId(null);
-            }
-          },
+          onPress: () => void confirmUpdate(),
         },
-      ],
-    );
+      ]);
+    }
   }
 
   function renderFilter(status: FilterStatus) {
@@ -335,530 +418,482 @@ export default function IncidentManagementScreen({
     return (
       <Pressable
         key={status}
+        onPress={() => {
+          setFilter(status);
+          setExpandedId(null);
+        }}
         style={[
           styles.filterButton,
           selected && styles.filterButtonSelected,
         ]}
-        onPress={() => setFilter(status)}
       >
         <Text
           style={[
             styles.filterText,
             selected && styles.filterTextSelected,
           ]}
+          numberOfLines={1}
         >
-          {status}
+          {status} ({counts[status]})
         </Text>
       </Pressable>
     );
   }
 
-  return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.topBar}>
-          <Pressable onPress={onBack} style={styles.backButton}>
-            <Text style={styles.backText}>‹  Dashboard</Text>
-          </Pressable>
+  function renderIncident({ item }: { item: Incident }) {
+    const expanded = expandedId === item.id;
+    const severityColors = getSeverityColors(item.severity);
+    const incidentIcon = getIncidentIcon(item);
+    const nextAction = getNextAction(item.status);
+    const isUpdating = updatingId === item.id;
 
-          <View style={styles.brandMark}>
-            <Text style={styles.brandMarkText}>A</Text>
-          </View>
-        </View>
+    const displayStatus =
+      item.status === 'Under Review' ? 'In Review' : item.status;
 
-        <View style={styles.heading}>
-          <Text style={styles.eyebrow}>SUPERVISOR WORKSPACE</Text>
-          <Text style={styles.title}>Incident Management</Text>
-          <Text style={styles.subtitle}>
-            Review reported incidents and manage their progress
-            through to closure.
-          </Text>
-        </View>
-
-        <View style={styles.summaryRow}>
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryNumber}>{openCount}</Text>
-            <Text style={styles.summaryLabel}>Open</Text>
-          </View>
-
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryNumber}>{reviewCount}</Text>
-            <Text style={styles.summaryLabel}>Under review</Text>
-          </View>
-
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryNumber}>{resolvedCount}</Text>
-            <Text style={styles.summaryLabel}>Resolved / closed</Text>
-          </View>
-        </View>
-
-        <View style={styles.sectionHeader}>
-          <View>
-            <Text style={styles.sectionTitle}>Reported incidents</Text>
-            <Text style={styles.sectionSubtitle}>
-              {incidents.length} report(s) recorded
+    return (
+      <View style={styles.incidentItem}>
+        <Pressable
+          style={styles.incidentRow}
+          onPress={() =>
+            setExpandedId(expanded ? null : item.id)
+          }
+        >
+          <View
+            style={[
+              styles.incidentIcon,
+              { borderColor: incidentIcon.color },
+            ]}
+          >
+            <Text
+              style={[
+                styles.incidentIconText,
+                { color: incidentIcon.color },
+              ]}
+            >
+              {incidentIcon.symbol}
             </Text>
           </View>
+
+          <View style={styles.incidentInfo}>
+            <Text style={styles.incidentTitle} numberOfLines={1}>
+              {getDisplayTitle(item)}
+            </Text>
+
+            <Text style={styles.incidentSubtitle} numberOfLines={1}>
+              {displayStatus} · {formatIncidentDate(item.reportedAt)}
+            </Text>
+          </View>
+
+          <View
+            style={[
+              styles.severityBadge,
+              { backgroundColor: severityColors.background },
+            ]}
+          >
+            <Text
+              style={[
+                styles.severityText,
+                { color: severityColors.text },
+              ]}
+            >
+              {item.severity}
+            </Text>
+          </View>
+
+          <Text style={styles.chevron}>
+            {expanded ? '⌄' : '›'}
+          </Text>
+        </Pressable>
+
+        {expanded && (
+          <View style={styles.details}>
+            <Detail label="INCIDENT TYPE" value={item.incidentType} />
+            <Detail label="REPORT CATEGORY" value={item.reportCategory} />
+
+            {!!item.flightNumber && (
+              <Detail
+                label="FLIGHT"
+                value={`${item.flightNumber}${
+                  item.flightRoute ? ` · ${item.flightRoute}` : ''
+                }`}
+              />
+            )}
+
+            <Detail
+              label="LOCATION"
+              value={item.location || 'Not specified'}
+            />
+
+            <Detail
+              label="DESCRIPTION"
+              value={item.description || 'No description provided.'}
+            />
+
+            {!!item.immediateAction && (
+              <Detail
+                label="IMMEDIATE ACTION TAKEN"
+                value={item.immediateAction}
+              />
+            )}
+
+            <Detail
+              label="INJURY REPORTED"
+              value={
+                item.injuryReported === 'Yes' && item.injuryDetails
+                  ? `Yes – ${item.injuryDetails}`
+                  : item.injuryReported || 'No'
+              }
+            />
+
+            <Detail
+              label="REPORTED BY"
+              value={item.reportedBy || 'Not available'}
+            />
+
+            <Detail
+              label="DATE REPORTED"
+              value={formatFullDate(item.reportedAt)}
+            />
+
+            <Detail label="CURRENT STATUS" value={displayStatus} />
+
+            {nextAction && (
+              <Pressable
+                style={[
+                  styles.updateButton,
+                  isUpdating && styles.disabledButton,
+                ]}
+                disabled={!!updatingId}
+                onPress={() =>
+                  changeStatus(item, nextAction.nextStatus)
+                }
+              >
+                {isUpdating ? (
+                  <ActivityIndicator color={WHITE} />
+                ) : (
+                  <Text style={styles.updateButtonText}>
+                    {nextAction.label}
+                  </Text>
+                )}
+              </Pressable>
+            )}
+          </View>
+        )}
+      </View>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.page}>
+        {/* Header */}
+        <View style={styles.header}>
+          <Pressable
+            onPress={onBack}
+            style={styles.backButton}
+            accessibilityLabel="Go back"
+          >
+            <Text style={styles.backText}>‹</Text>
+          </Pressable>
+
+          <Text style={styles.heading}>Incidents</Text>
         </View>
 
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filters}
-        >
+        {/* Filters: fixed-height row directly under header */}
+        <View style={styles.filters}>
           {FILTERS.map(renderFilter)}
-        </ScrollView>
+        </View>
 
+        {/* List begins immediately below filters */}
         {loading ? (
-          <View style={styles.messageCard}>
+          <View style={styles.messageContainer}>
             <ActivityIndicator color={RED} size="large" />
             <Text style={styles.messageText}>
-              Loading incident reports...
+              Loading incidents...
             </Text>
           </View>
         ) : error ? (
-          <View style={styles.messageCard}>
+          <View style={styles.messageContainer}>
             <Text style={styles.errorText}>{error}</Text>
           </View>
-        ) : filteredIncidents.length === 0 ? (
-          <View style={styles.messageCard}>
-            <Text style={styles.emptyTitle}>
-              No reports in this category
-            </Text>
-            <Text style={styles.messageText}>
-              Reports will appear here when handlers submit them.
-            </Text>
-          </View>
         ) : (
-          filteredIncidents.map(incident => {
-            const severityColors = getSeverityColors(
-              incident.severity,
-            );
-
-            const statusColors = getStatusColors(
-              incident.status,
-            );
-
-            const nextAction = getNextAction(incident.status);
-            const isUpdating = updatingId === incident.id;
-
-            return (
-              <View key={incident.id} style={styles.incidentCard}>
-                <View style={styles.cardHeader}>
-                  <View style={styles.cardHeading}>
-                    <Text style={styles.category}>
-                      {incident.reportCategory}
-                    </Text>
-                    <Text style={styles.incidentType}>
-                      {incident.incidentType}
-                    </Text>
-                  </View>
-
-                  <View
-                    style={[
-                      styles.badge,
-                      { backgroundColor: severityColors.background },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.badgeText,
-                        { color: severityColors.text },
-                      ]}
-                    >
-                      {incident.severity}
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.divider} />
-
-                <View style={styles.statusRow}>
-                  <Text style={styles.detailLabel}>CURRENT STATUS</Text>
-                  <View
-                    style={[
-                      styles.badge,
-                      { backgroundColor: statusColors.background },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.badgeText,
-                        { color: statusColors.text },
-                      ]}
-                    >
-                      {incident.status}
-                    </Text>
-                  </View>
-                </View>
-
-                {incident.flightNumber ? (
-                  <View style={styles.detailBlock}>
-                    <Text style={styles.detailLabel}>FLIGHT</Text>
-                    <Text style={styles.detailValue}>
-                      {incident.flightNumber}
-                    </Text>
-                    {!!incident.flightRoute && (
-                      <Text style={styles.detailSecondary}>
-                        {incident.flightRoute}
-                      </Text>
-                    )}
-                  </View>
-                ) : null}
-
-                <View style={styles.detailBlock}>
-                  <Text style={styles.detailLabel}>LOCATION</Text>
-                  <Text style={styles.detailValue}>
-                    {incident.location || 'Not specified'}
-                  </Text>
-                </View>
-
-                <View style={styles.detailBlock}>
-                  <Text style={styles.detailLabel}>DESCRIPTION</Text>
-                  <Text style={styles.description}>
-                    {incident.description || 'No description provided.'}
-                  </Text>
-                </View>
-
-                {!!incident.immediateAction && (
-                  <View style={styles.detailBlock}>
-                    <Text style={styles.detailLabel}>
-                      IMMEDIATE ACTION TAKEN
-                    </Text>
-                    <Text style={styles.description}>
-                      {incident.immediateAction}
-                    </Text>
-                  </View>
-                )}
-
-                <View style={styles.detailBlock}>
-                  <Text style={styles.detailLabel}>INJURY REPORTED</Text>
-                  <Text style={styles.detailValue}>
-                    {incident.injuryReported}
-                  </Text>
-                  {incident.injuryReported === 'Yes' &&
-                    !!incident.injuryDetails && (
-                      <Text style={styles.detailSecondary}>
-                        {incident.injuryDetails}
-                      </Text>
-                    )}
-                </View>
-
-                <View style={styles.detailBlock}>
-                  <Text style={styles.detailLabel}>REPORTED</Text>
-                  <Text style={styles.detailSecondary}>
-                    {formatDate(incident.reportedAt)}
-                  </Text>
-                </View>
-
-                <View style={styles.actionDivider} />
-
-                {nextAction ? (
-                  <Pressable
-                    style={[
-                      styles.updateButton,
-                      incident.status === 'Closed' &&
-                        styles.reopenButton,
-                      isUpdating && styles.disabledButton,
-                    ]}
-                    disabled={!!updatingId}
-                    onPress={() =>
-                      changeStatus(
-                        incident,
-                        nextAction.nextStatus,
-                      )
-                    }
-                  >
-                    {isUpdating ? (
-                      <ActivityIndicator color={WHITE} />
-                    ) : (
-                      <Text style={styles.updateButtonText}>
-                        {nextAction.label}
-                      </Text>
-                    )}
-                  </Pressable>
-                ) : null}
-
-                {incident.status === 'Closed' && (
-                  <Text style={styles.closedNote}>
-                    This report is closed. You can reopen it if
-                    further action is needed.
-                  </Text>
-                )}
+          <FlatList
+            data={filteredIncidents}
+            keyExtractor={(item) => item.id}
+            renderItem={renderIncident}
+            style={styles.list}
+            contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            ListEmptyComponent={
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyTitle}>
+                  No incidents found
+                </Text>
+                <Text style={styles.messageText}>
+                  There are no reports in this category.
+                </Text>
               </View>
-            );
-          })
+            }
+          />
         )}
-
-        <Text style={styles.footer}>
-          AEROSYNC · KENYA AIRWAYS GROUND OPERATIONS
-        </Text>
-      </ScrollView>
+      </View>
     </SafeAreaView>
+  );
+}
+
+function Detail({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <View style={styles.detailRow}>
+      <Text style={styles.detailLabel}>{label}</Text>
+      <Text style={styles.detailValue}>{value}</Text>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: BACKGROUND,
+    backgroundColor: BG,
   },
-  content: {
-    paddingHorizontal: 18,
-    paddingTop: 12,
-    paddingBottom: 35,
+
+  page: {
+    flex: 1,
+    width: '100%',
+    maxWidth: 850,
+    alignSelf: 'center',
+    backgroundColor: BG,
   },
-  topBar: {
+
+  header: {
+    height: 62,
+    flexShrink: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    gap: 14,
+    backgroundColor: WHITE,
+  },
+
+  backButton: {
+    width: 30,
+    height: 42,
+    justifyContent: 'center',
+  },
+
+  backText: {
+    fontSize: 34,
+    lineHeight: 38,
+    color: DARK,
+  },
+
+  heading: {
+    color: DARK,
+    fontSize: 21,
+    fontWeight: '800',
+  },
+
+  filters: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 22,
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexShrink: 0,
+    backgroundColor: WHITE,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
   },
-  backButton: {
-    paddingVertical: 8,
-    paddingRight: 12,
+
+  filterButton: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: WHITE,
+    borderRadius: 22,
+    paddingHorizontal: 3,
+    paddingVertical: 10,
   },
-  backText: {
-    color: DARK_RED,
-    fontSize: 14,
+
+  filterButtonSelected: {
+    borderColor: RED,
+    backgroundColor: '#FFF5F6',
+  },
+
+  filterText: {
+    color: DARK,
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+
+  filterTextSelected: {
+    color: RED,
     fontWeight: '800',
   },
-  brandMark: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: RED,
+
+  list: {
+    flex: 1,
+  },
+
+  listContent: {
+    paddingHorizontal: 16,
+    paddingTop: 0,
+    paddingBottom: 24,
+    flexGrow: 1,
+  },
+
+  incidentItem: {
+    backgroundColor: WHITE,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
+  },
+
+  incidentRow: {
+    minHeight: 76,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 3,
+    gap: 10,
+  },
+
+  incidentIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 20,
+    borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  brandMarkText: {
-    color: WHITE,
-    fontSize: 22,
-    fontWeight: '900',
+
+  incidentIconText: {
+    fontSize: 21,
+    fontWeight: '800',
   },
-  heading: {
-    marginBottom: 18,
-  },
-  eyebrow: {
-    color: RED,
-    fontSize: 10,
-    fontWeight: '900',
-    letterSpacing: 1,
-    marginBottom: 7,
-  },
-  title: {
-    color: TEXT,
-    fontSize: 26,
-    fontWeight: '900',
-  },
-  subtitle: {
-    color: MUTED,
-    fontSize: 13,
-    lineHeight: 20,
-    marginTop: 6,
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    gap: 9,
-    marginBottom: 24,
-  },
-  summaryCard: {
+
+  incidentInfo: {
     flex: 1,
     minWidth: 0,
-    backgroundColor: WHITE,
-    borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 15,
-    padding: 12,
+    gap: 5,
   },
-  summaryNumber: {
-    color: TEXT,
-    fontSize: 24,
-    fontWeight: '900',
+
+  incidentTitle: {
+    color: DARK,
+    fontSize: 13,
+    fontWeight: '800',
   },
-  summaryLabel: {
-    color: MUTED,
-    fontSize: 10,
-    lineHeight: 15,
-    marginTop: 4,
-  },
-  sectionHeader: {
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    color: TEXT,
-    fontSize: 18,
-    fontWeight: '900',
-  },
-  sectionSubtitle: {
+
+  incidentSubtitle: {
     color: MUTED,
     fontSize: 11,
-    marginTop: 4,
   },
-  filters: {
-    gap: 8,
-    paddingBottom: 14,
-  },
-  filterButton: {
-    borderWidth: 1,
-    borderColor: BORDER,
-    backgroundColor: WHITE,
-    borderRadius: 20,
-    paddingHorizontal: 13,
-    paddingVertical: 9,
-  },
-  filterButtonSelected: {
-    backgroundColor: RED,
-    borderColor: RED,
-  },
-  filterText: {
-    color: MUTED,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  filterTextSelected: {
-    color: WHITE,
-  },
-  incidentCard: {
-    backgroundColor: WHITE,
-    borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 18,
-    padding: 16,
-    marginBottom: 13,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  cardHeading: {
-    flex: 1,
-  },
-  category: {
-    color: TEXT,
-    fontSize: 16,
-    fontWeight: '900',
-  },
-  incidentType: {
-    color: MUTED,
-    fontSize: 12,
-    marginTop: 3,
-  },
-  badge: {
-    borderRadius: 20,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  badgeText: {
-    fontSize: 10,
-    fontWeight: '900',
-  },
-  divider: {
-    height: 1,
-    backgroundColor: BORDER,
-    marginVertical: 13,
-  },
-  statusRow: {
-    flexDirection: 'row',
+
+  severityBadge: {
+    minWidth: 66,
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 14,
+    justifyContent: 'center',
+    borderRadius: 18,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
   },
-  detailBlock: {
-    marginBottom: 13,
+
+  severityText: {
+    fontSize: 11,
+    fontWeight: '800',
   },
+
+  chevron: {
+    color: DARK,
+    fontSize: 25,
+    paddingLeft: 1,
+  },
+
+  details: {
+    paddingHorizontal: 51,
+    paddingTop: 4,
+    paddingBottom: 14,
+    gap: 11,
+  },
+
+  detailRow: {
+    gap: 4,
+  },
+
   detailLabel: {
     color: MUTED,
     fontSize: 9,
-    fontWeight: '900',
-    letterSpacing: 0.6,
-    marginBottom: 4,
+    fontWeight: '800',
+    letterSpacing: 0.7,
   },
+
   detailValue: {
-    color: TEXT,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  detailSecondary: {
-    color: MUTED,
-    fontSize: 11,
-    lineHeight: 17,
-    marginTop: 3,
-  },
-  description: {
-    color: TEXT,
+    color: DARK,
     fontSize: 12,
-    lineHeight: 19,
+    lineHeight: 18,
   },
-  actionDivider: {
-    height: 1,
-    backgroundColor: BORDER,
-    marginTop: 3,
-    marginBottom: 13,
-  },
+
   updateButton: {
+    minHeight: 43,
     backgroundColor: RED,
-    borderRadius: 12,
-    minHeight: 45,
+    borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: 5,
     paddingHorizontal: 14,
   },
-  reopenButton: {
-    backgroundColor: '#475569',
-  },
-  disabledButton: {
-    opacity: 0.6,
-  },
+
   updateButtonText: {
     color: WHITE,
-    fontSize: 13,
-    fontWeight: '900',
+    fontSize: 12,
+    fontWeight: '800',
   },
-  closedNote: {
-    color: GREEN,
-    fontSize: 11,
-    lineHeight: 17,
-    textAlign: 'center',
+
+  disabledButton: {
+    opacity: 0.55,
   },
-  messageCard: {
-    backgroundColor: WHITE,
-    borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 16,
-    padding: 22,
+
+  messageContainer: {
+    flex: 1,
     alignItems: 'center',
-    marginTop: 8,
+    justifyContent: 'center',
+    padding: 28,
+    gap: 12,
   },
+
   messageText: {
     color: MUTED,
     fontSize: 12,
-    lineHeight: 18,
+    lineHeight: 19,
     textAlign: 'center',
-    marginTop: 10,
   },
-  emptyTitle: {
-    color: TEXT,
-    fontSize: 15,
-    fontWeight: '900',
-  },
+
   errorText: {
     color: RED,
-    fontSize: 12,
-    lineHeight: 18,
+    fontSize: 13,
+    lineHeight: 20,
     textAlign: 'center',
   },
-  footer: {
-    color: MUTED,
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 0.6,
-    textAlign: 'center',
-    marginTop: 25,
+
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 55,
+    gap: 8,
+  },
+
+  emptyTitle: {
+    color: DARK,
+    fontSize: 16,
+    fontWeight: '800',
   },
 });

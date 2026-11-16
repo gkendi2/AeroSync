@@ -1,3 +1,4 @@
+
 import { auth, db } from '@/lib/firebase';
 import {
   collection,
@@ -9,6 +10,7 @@ import {
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  ImageBackground,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -34,14 +36,72 @@ type DashboardScreen =
   | 'flights'
   | 'incident-management';
 
-const RED = '#F0182B';
-const DEEP_RED = '#B51F3A';
+type FlightSummary = {
+  id: string;
+  flightNumber?: string;
+  origin?: string;
+  destination?: string;
+  departureDate?: string;
+  departureTime?: string;
+  status?: string;
+};
+
+const RED = '#C8102E';
+const DARK = '#20252B';
+const MUTED = '#737B84';
+const BORDER = '#E7E9EC';
+const WHITE = '#FFFFFF';
 const BACKGROUND = '#F5F5F6';
-const TEXT = '#222222';
-const MUTED = '#737373';
-const BORDER = '#E7E7E9';
-const PALE_RED = '#FDECEF';
-const GREEN = '#16805C';
+
+const AIRPORT_IMAGE =
+  'https://images.unsplash.com/photo-1436491865332-7a61a109cc05?auto=format&fit=crop&w=1600&q=90';
+
+function getToday() {
+  const date = new Date();
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+function getFormattedDate() {
+  return new Date().toLocaleDateString('en-KE', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  });
+}
+
+function getStatusStyle(status: string) {
+  const value = status.toLowerCase();
+
+  if (
+    value.includes('risk') ||
+    value.includes('delay') ||
+    value.includes('cancel')
+  ) {
+    return { backgroundColor: '#FCE9EC', color: RED };
+  }
+
+  if (
+    value.includes('progress') ||
+    value.includes('turnaround') ||
+    value.includes('boarding')
+  ) {
+    return { backgroundColor: '#E8F0FA', color: '#2863A6' };
+  }
+
+  if (
+    value.includes('complete') ||
+    value.includes('departed') ||
+    value.includes('arrived')
+  ) {
+    return { backgroundColor: '#E8F3EC', color: '#287448' };
+  }
+
+  return { backgroundColor: '#F0F1F2', color: '#626970' };
+}
 
 export default function HomeScreen() {
   const [role, setRole] = useState('');
@@ -52,6 +112,8 @@ export default function HomeScreen() {
   const [pendingCount, setPendingCount] = useState(0);
   const [baggageCount, setBaggageCount] = useState(0);
   const [crewCount, setCrewCount] = useState(0);
+  const [todayFlights, setTodayFlights] = useState<FlightSummary[]>([]);
+  const [flightsLoading, setFlightsLoading] = useState(true);
 
   useEffect(() => {
     const user = auth.currentUser;
@@ -81,41 +143,54 @@ export default function HomeScreen() {
   }, []);
 
   useEffect(() => {
-    if (role !== 'supervisor') {
-      return;
-    }
+    if (role !== 'supervisor') return;
 
     const unsubscribePending = onSnapshot(
-      query(
-        collection(db, 'users'),
-        where('role', '==', 'pending')
-      ),
+      query(collection(db, 'users'), where('role', '==', 'pending')),
       (snapshot) => setPendingCount(snapshot.size),
-      (error) =>
-        console.error('Could not load pending count:', error)
+      (error) => console.error('Could not load pending count:', error)
     );
 
     const unsubscribeCrew = onSnapshot(
-      query(
-        collection(db, 'users'),
-        where('role', '==', 'handler')
-      ),
+      query(collection(db, 'users'), where('role', '==', 'handler')),
       (snapshot) => setCrewCount(snapshot.size),
-      (error) =>
-        console.error('Could not load crew count:', error)
+      (error) => console.error('Could not load crew count:', error)
     );
 
     const unsubscribeBaggage = onSnapshot(
       collection(db, 'BaggageRecords'),
       (snapshot) => setBaggageCount(snapshot.size),
-      (error) =>
-        console.error('Could not load baggage count:', error)
+      (error) => console.error('Could not load baggage count:', error)
+    );
+
+    const unsubscribeFlights = onSnapshot(
+      collection(db, 'Flights'),
+      (snapshot) => {
+        const records = snapshot.docs.map((item) => ({
+          id: item.id,
+          ...item.data(),
+        })) as FlightSummary[];
+
+        const filtered = records
+          .filter((flight) => flight.departureDate === getToday())
+          .sort((a, b) =>
+            (a.departureTime || '').localeCompare(b.departureTime || '')
+          );
+
+        setTodayFlights(filtered);
+        setFlightsLoading(false);
+      },
+      (error) => {
+        console.error('Could not load today’s flights:', error);
+        setFlightsLoading(false);
+      }
     );
 
     return () => {
       unsubscribePending();
       unsubscribeCrew();
       unsubscribeBaggage();
+      unsubscribeFlights();
     };
   }, [role]);
 
@@ -126,38 +201,19 @@ export default function HomeScreen() {
   if (profileLoading) {
     return (
       <SafeAreaView style={styles.loadingScreen}>
-        <View style={styles.loadingLogo}>
-          <Text style={styles.loadingLogoText}>A</Text>
-        </View>
+        <Text style={styles.loadingLogo}>K</Text>
         <ActivityIndicator size="large" color={RED} />
-        <Text style={styles.loadingText}>
-          Loading AeroSync...
-        </Text>
+        <Text style={styles.loadingText}>Loading AeroSync...</Text>
       </SafeAreaView>
     );
   }
 
   if (role === 'supervisor') {
-    if (screen === 'approvals') {
-      return <ApprovalsScreen onBack={goBack} />;
-    }
-
-    if (screen === 'baggage') {
-      return <BaggageScreen onBack={goBack} />;
-    }
-
-    if (screen === 'crew') {
-      return <CrewScreen onBack={goBack} />;
-    }
-
-    if (screen === 'delay-risk') {
-      return <DelayRiskScreen onBack={goBack} />;
-    }
-
-    if (screen === 'flights') {
-      return <FlightsScreen onBack={goBack} />;
-    }
-
+    if (screen === 'approvals') return <ApprovalsScreen onBack={goBack} />;
+    if (screen === 'baggage') return <BaggageScreen onBack={goBack} />;
+    if (screen === 'crew') return <CrewScreen onBack={goBack} />;
+    if (screen === 'delay-risk') return <DelayRiskScreen onBack={goBack} />;
+    if (screen === 'flights') return <FlightsScreen onBack={goBack} />;
     if (screen === 'incident-management') {
       return <IncidentManagementScreen onBack={goBack} />;
     }
@@ -169,14 +225,11 @@ export default function HomeScreen() {
 
   if (role !== 'supervisor') {
     return (
-      <SafeAreaView style={styles.safeArea}>
-        <ScrollView
-          contentContainerStyle={styles.pendingContent}
-          showsVerticalScrollIndicator={false}
-        >
+      <SafeAreaView style={styles.pendingScreen}>
+        <ScrollView contentContainerStyle={styles.pendingContent}>
           <View style={styles.brandRow}>
             <View style={styles.brandMark}>
-              <Text style={styles.brandMarkText}>A</Text>
+              <Text style={styles.brandMarkText}>K</Text>
             </View>
             <View>
               <Text style={styles.brandName}>AeroSync</Text>
@@ -187,44 +240,34 @@ export default function HomeScreen() {
           </View>
 
           <View style={styles.pendingHero}>
-            <View style={styles.pendingIcon}>
-              <Text style={styles.pendingIconText}>⏳</Text>
-            </View>
+            <Text style={styles.pendingEyebrow}>ACCOUNT ACCESS</Text>
             <Text style={styles.pendingTitle}>
               Account pending approval
             </Text>
-            <Text style={styles.pendingSubtitle}>
-              Your account has not been approved for operational
-              access yet. Please contact your supervisor.
+            <Text style={styles.pendingDescription}>
+              Your account has not been approved for operational access
+              yet. Please contact your supervisor.
             </Text>
           </View>
 
-          <View style={styles.infoCard}>
-            <Text style={styles.cardEyebrow}>ACCOUNT</Text>
-            <Text style={styles.cardTitle}>
+          <View style={styles.pendingAccount}>
+            <Text style={styles.pendingLabel}>SIGNED-IN ACCOUNT</Text>
+            <Text style={styles.pendingName}>
               {auth.currentUser?.displayName ||
                 auth.currentUser?.email ||
                 'Signed-in user'}
             </Text>
-            <View style={styles.accountStatusRow}>
-              <View style={styles.pendingDot} />
-              <Text style={styles.accountStatusText}>
-                {role || 'Waiting for approval'}
-              </Text>
-            </View>
+            <Text style={styles.pendingStatus}>
+              {role || 'Waiting for approval'}
+            </Text>
           </View>
-
-          <Text style={styles.footer}>
-            AEROSYNC · GROUND OPERATIONS
-          </Text>
         </ScrollView>
       </SafeAreaView>
     );
   }
 
   const supervisorName =
-    auth.currentUser?.displayName?.split(' ')[0] ||
-    'Supervisor';
+    auth.currentUser?.displayName?.split(' ')[0] || 'Supervisor';
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -232,351 +275,235 @@ export default function HomeScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        {/* Brand header */}
-        <View style={styles.headerRow}>
-          <View style={styles.headerBrand}>
+        {/* Application header */}
+        <View style={styles.header}>
+          <View style={styles.brandRow}>
             <View style={styles.brandMarkSmall}>
-              <Text style={styles.brandMarkSmallText}>A</Text>
+              <Text style={styles.brandMarkSmallText}>K</Text>
             </View>
             <View>
               <Text style={styles.brandNameSmall}>AeroSync</Text>
-              <Text style={styles.headerRole}>
-                KENYA AIRWAYS · SUPERVISOR
-              </Text>
+              <Text style={styles.headerRole}>SUPERVISOR</Text>
             </View>
           </View>
 
-          <View style={styles.liveIndicator}>
-            <View style={styles.liveDot} />
-            <Text style={styles.liveText}>LIVE</Text>
-          </View>
+          <Pressable
+            style={styles.notificationButton}
+            onPress={() => setScreen('approvals')}
+            accessibilityLabel="Open staff approvals"
+          >
+            <Text style={styles.notificationIcon}>♧</Text>
+            {pendingCount > 0 && <View style={styles.notificationDot} />}
+          </Pressable>
         </View>
 
-        {/* Greeting */}
-        <View style={styles.greetingBlock}>
-          <Text style={styles.greeting}>
-            Good to see you, {supervisorName}.
-          </Text>
-          <Text style={styles.subtitle}>
-            Here's your ground operations overview.
-          </Text>
-        </View>
+        {/* Main aviation image */}
+        <ImageBackground
+          source={{ uri: AIRPORT_IMAGE }}
+          style={styles.welcomeImage}
+          imageStyle={styles.welcomeImageRadius}
+          resizeMode="cover"
+        >
+          <View style={styles.imageOverlay}>
+            <View style={styles.welcomeCopy}>
+              <Text style={styles.greeting}>Good morning,</Text>
+              <Text style={styles.greetingName}>
+                {supervisorName}.
+              </Text>
+              <Text style={styles.dateText}>{getFormattedDate()}</Text>
+            </View>
+            <View style={styles.imageBottomLine} />
+          </View>
+        </ImageBackground>
 
-        {/* Red operations banner */}
-        <View style={styles.heroCard}>
-          <View style={styles.heroTop}>
-            <View style={styles.heroTextBlock}>
-              <Text style={styles.heroEyebrow}>
-                OPERATIONS CONTROL
+        {/* Overlapping operations summary */}
+        <Pressable
+          style={styles.metricsPanel}
+          onPress={() => setScreen('crew')}
+        >
+          <View style={styles.metricsHeading}>
+            <View>
+              <Text style={styles.metricsTitle}>
+                Operations at a glance
               </Text>
-              <Text style={styles.heroTitle}>
-                Keep the operation moving.
-              </Text>
-              <Text style={styles.heroSubtitle}>
-                Monitor crew coordination, baggage activity and
-                staff readiness from one place.
+              <Text style={styles.metricsSubtitle}>
+                Current operational records
               </Text>
             </View>
-
-            <View style={styles.planeCircle}>
-              <Text style={styles.planeText}>✈</Text>
-            </View>
+            <Text style={styles.metricsArrow}>›</Text>
           </View>
 
-          <View style={styles.heroDivider} />
+          <View style={styles.metricsValues}>
+            <Pressable
+              style={styles.metric}
+              onPress={() => setScreen('crew')}
+            >
+              <Text style={styles.metricValue}>{crewCount}</Text>
+              <Text style={styles.metricLabel}>Handlers</Text>
+            </Pressable>
 
-          <View style={styles.heroFooter}>
-            <View style={styles.heroMetric}>
-              <Text style={styles.heroMetricLabel}>HANDLERS</Text>
-              <Text style={styles.heroMetricValue}>
-                {crewCount}
-              </Text>
-            </View>
+            <View style={styles.metricDivider} />
 
-            <View style={styles.heroMetricDivider} />
+            <Pressable
+              style={styles.metric}
+              onPress={() => setScreen('baggage')}
+            >
+              <Text style={styles.metricValue}>{baggageCount}</Text>
+              <Text style={styles.metricLabel}>Baggage</Text>
+            </Pressable>
 
-            <View style={styles.heroMetric}>
-              <Text style={styles.heroMetricLabel}>BAGGAGE</Text>
-              <Text style={styles.heroMetricValue}>
-                {baggageCount}
-              </Text>
-            </View>
+            <View style={styles.metricDivider} />
 
-            <View style={styles.heroMetricDivider} />
-
-            <View style={styles.heroMetric}>
-              <Text style={styles.heroMetricLabel}>APPROVALS</Text>
-              <Text style={styles.heroMetricValue}>
+            <Pressable
+              style={styles.metric}
+              onPress={() => setScreen('approvals')}
+            >
+              <Text
+                style={[
+                  styles.metricValue,
+                  pendingCount > 0 && styles.metricAlert,
+                ]}
+              >
                 {pendingCount}
               </Text>
-            </View>
+              <Text style={styles.metricLabel}>Pending</Text>
+            </Pressable>
           </View>
-        </View>
+        </Pressable>
 
-        {/* Action required */}
-        {pendingCount > 0 && (
-          <Pressable
-            style={({ pressed }) => [
-              styles.attentionCard,
-              pressed && styles.pressed,
-            ]}
-            onPress={() => setScreen('approvals')}
-          >
-            <View style={styles.attentionIcon}>
-              <Text style={styles.attentionIconText}>!</Text>
-            </View>
-            <View style={styles.attentionInfo}>
-              <Text style={styles.attentionTitle}>
-                Action required
-              </Text>
-              <Text style={styles.attentionText}>
-                {pendingCount === 1
-                  ? '1 staff application is waiting for review.'
-                  : `${pendingCount} staff applications are waiting for review.`}
-              </Text>
-            </View>
-            <Text style={styles.attentionArrow}>›</Text>
-          </Pressable>
-        )}
-
-        {/* Summary cards */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>
-            Today's overview
-          </Text>
-          <Text style={styles.sectionSubtitle}>
-            Live records from AeroSync
-          </Text>
-        </View>
-
-        <View style={styles.statsGrid}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.statCard,
-              pressed && styles.pressed,
-            ]}
-            onPress={() => setScreen('crew')}
-          >
-            <View style={styles.statIcon}>
-              <Text style={styles.statIconText}>♧</Text>
-            </View>
-            <Text style={styles.statNumber}>{crewCount}</Text>
-            <Text style={styles.statLabel}>
-              Approved handlers
+        {/* Flight register */}
+        <View style={styles.sectionHeading}>
+          <View>
+            <Text style={styles.sectionTitle}>Today's flights</Text>
+            <Text style={styles.sectionSubtitle}>
+              Scheduled departures
             </Text>
-          </Pressable>
-
-          <Pressable
-            style={({ pressed }) => [
-              styles.statCard,
-              pressed && styles.pressed,
-            ]}
-            onPress={() => setScreen('baggage')}
-          >
-            <View style={styles.statIcon}>
-              <Text style={styles.statIconText}>▣</Text>
-            </View>
-            <Text style={styles.statNumber}>{baggageCount}</Text>
-            <Text style={styles.statLabel}>
-              Baggage records
-            </Text>
-          </Pressable>
-
-          <Pressable
-            style={({ pressed }) => [
-              styles.statCard,
-              pressed && styles.pressed,
-            ]}
-            onPress={() => setScreen('approvals')}
-          >
-            <View style={styles.statIcon}>
-              <Text style={styles.statIconText}>✓</Text>
-            </View>
-            <Text style={styles.statNumber}>{pendingCount}</Text>
-            <Text style={styles.statLabel}>
-              Pending approvals
-            </Text>
-          </Pressable>
-
-          <View style={styles.statCard}>
-            <View style={styles.statIcon}>
-              <Text style={styles.statIconText}>!</Text>
-            </View>
-            <Text style={styles.statNumber}>—</Text>
-            <Text style={styles.statLabel}>Open incidents</Text>
-            <Text style={styles.comingSoon}>Not connected yet</Text>
           </View>
-        </View>
-
-        {/* Operational shortcuts */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>
-            Operations management
-          </Text>
-          <Text style={styles.sectionSubtitle}>
-            Choose a workspace to continue
-          </Text>
-        </View>
-
-        <View style={styles.actionList}>
-          {/* Flight management */}
           <Pressable
-            style={({ pressed }) => [
-              styles.actionCard,
-              pressed && styles.pressed,
-            ]}
+            style={styles.viewAllButton}
             onPress={() => setScreen('flights')}
           >
-            <View style={styles.actionIcon}>
-              <Text style={styles.actionIconText}>✈</Text>
-            </View>
-            <View style={styles.actionInfo}>
-              <Text style={styles.actionTitle}>
-                Flight management
-              </Text>
-              <Text style={styles.actionDescription}>
-                Create flights and load sample demo flights.
-              </Text>
-            </View>
-            <Text style={styles.actionArrow}>›</Text>
+            <Text style={styles.viewAll}>View all</Text>
+            <Text style={styles.viewAllArrow}>›</Text>
           </Pressable>
+        </View>
 
-          <Pressable
-            style={({ pressed }) => [
-              styles.actionCard,
-              pressed && styles.pressed,
-            ]}
-            onPress={() => setScreen('crew')}
-          >
-            <View style={styles.actionIcon}>
-              <Text style={styles.actionIconText}>♧</Text>
+        <View style={styles.flightList}>
+          {flightsLoading ? (
+            <View style={styles.emptyState}>
+              <ActivityIndicator color={RED} />
+              <Text style={styles.emptyText}>Loading flights...</Text>
             </View>
-            <View style={styles.actionInfo}>
-              <Text style={styles.actionTitle}>
-                Crew coordination
-              </Text>
-              <Text style={styles.actionDescription}>
-                Manage handlers, shifts and assignments.
-              </Text>
-            </View>
-            <Text style={styles.actionArrow}>›</Text>
-          </Pressable>
-
-          <Pressable
-            style={({ pressed }) => [
-              styles.actionCard,
-              pressed && styles.pressed,
-            ]}
-            onPress={() => setScreen('baggage')}
-          >
-            <View style={styles.actionIcon}>
-              <Text style={styles.actionIconText}>▣</Text>
-            </View>
-            <View style={styles.actionInfo}>
-              <Text style={styles.actionTitle}>
-                Baggage tracking
-              </Text>
-              <Text style={styles.actionDescription}>
-                Review baggage records and handling status.
-              </Text>
-            </View>
-            <Text style={styles.actionArrow}>›</Text>
-          </Pressable>
-
-          <Pressable
-            style={({ pressed }) => [
-              styles.actionCard,
-              pressed && styles.pressed,
-            ]}
-            onPress={() => setScreen('delay-risk')}
-          >
-            <View style={styles.actionIcon}>
-              <Text style={styles.actionIconText}>!</Text>
-            </View>
-            <View style={styles.actionInfo}>
-              <Text style={styles.actionTitle}>
-                Delay-risk monitoring
-              </Text>
-              <Text style={styles.actionDescription}>
-                Review operational indicators and delay risks.
-              </Text>
-            </View>
-            <Text style={styles.actionArrow}>›</Text>
-          </Pressable>
-
-          {/* Incident management */}
-          <Pressable
-            style={({ pressed }) => [
-              styles.actionCard,
-              pressed && styles.pressed,
-            ]}
-            onPress={() => setScreen('incident-management')}
-          >
-            <View style={styles.actionIcon}>
-              <Text style={styles.actionIconText}>!</Text>
-            </View>
-            <View style={styles.actionInfo}>
-              <Text style={styles.actionTitle}>
-                Incident management
-              </Text>
-              <Text style={styles.actionDescription}>
-                Review reports, investigate incidents and manage closure.
-              </Text>
-            </View>
-            <Text style={styles.actionArrow}>›</Text>
-          </Pressable>
-
-          <Pressable
-            style={({ pressed }) => [
-              styles.actionCard,
-              pressed && styles.pressed,
-            ]}
-            onPress={() => setScreen('approvals')}
-          >
-            <View style={styles.actionIcon}>
-              <Text style={styles.actionIconText}>✓</Text>
-            </View>
-            <View style={styles.actionInfo}>
-              <View style={styles.actionTitleRow}>
-                <Text style={styles.actionTitle}>
-                  Staff approvals
+          ) : todayFlights.length === 0 ? (
+            <Pressable
+              style={styles.emptyState}
+              onPress={() => setScreen('flights')}
+            >
+              <View style={styles.emptyFlightIcon}>
+                <Text style={styles.emptyFlightIconText}>✈</Text>
+              </View>
+              <View style={styles.emptyFlightCopy}>
+                <Text style={styles.emptyTitle}>
+                  No flights scheduled today
                 </Text>
-                {pendingCount > 0 && (
-                  <View style={styles.actionBadge}>
-                    <Text style={styles.actionBadgeText}>
-                      {pendingCount}
+                <Text style={styles.emptyText}>
+                  Your scheduled departures will appear here.
+                </Text>
+              </View>
+              <Text style={styles.rowArrow}>›</Text>
+            </Pressable>
+          ) : (
+            todayFlights.slice(0, 4).map((flight, index) => {
+              const status = flight.status || 'Scheduled';
+              const statusStyle = getStatusStyle(status);
+
+              return (
+                <Pressable
+                  key={flight.id}
+                  style={[
+                    styles.flightRow,
+                    index === Math.min(todayFlights.length, 4) - 1 &&
+                      styles.lastFlightRow,
+                  ]}
+                  onPress={() => setScreen('flights')}
+                >
+                  <View style={styles.flightMain}>
+                    <Text style={styles.flightNumber}>
+                      {flight.flightNumber || 'Flight'}
+                    </Text>
+                    <Text style={styles.flightRoute}>
+                      {flight.origin || '—'} → {flight.destination || '—'}
                     </Text>
                   </View>
-                )}
+
+                  <Text style={styles.flightTime}>
+                    {flight.departureTime || '—'}
+                  </Text>
+
+                  <View
+                    style={[
+                      styles.statusBadge,
+                      { backgroundColor: statusStyle.backgroundColor },
+                    ]}
+                  >
+                    <Text style={[styles.statusText, { color: statusStyle.color }]}>
+                      {status}
+                    </Text>
+                  </View>
+
+                  <Text style={styles.rowArrow}>›</Text>
+                </Pressable>
+              );
+            })
+          )}
+        </View>
+
+        {/* Action queue */}
+        {pendingCount > 0 && (
+          <>
+            <View style={styles.sectionHeading}>
+              <View>
+                <Text style={styles.sectionTitle}>Needs attention</Text>
+                <Text style={styles.sectionSubtitle}>
+                  Items requiring supervisor review
+                </Text>
               </View>
-              <Text style={styles.actionDescription}>
-                Review pending handler applications.
-              </Text>
+              <View style={styles.attentionCount}>
+                <Text style={styles.attentionCountText}>
+                  {pendingCount}
+                </Text>
+              </View>
             </View>
-            <Text style={styles.actionArrow}>›</Text>
-          </Pressable>
-        </View>
 
-        {/* Account information */}
-        <View style={styles.accountCard}>
-          <View style={styles.accountAvatar}>
-            <Text style={styles.accountAvatarText}>
-              {supervisorName.charAt(0).toUpperCase()}
-            </Text>
-          </View>
-          <View style={styles.accountInfo}>
-            <Text style={styles.accountLabel}>
-              SUPERVISOR ACCOUNT
-            </Text>
-            <Text style={styles.accountEmail}>
-              {auth.currentUser?.email || 'Supervisor account'}
-            </Text>
-          </View>
-        </View>
+            <Pressable
+              style={styles.attentionRow}
+              onPress={() => setScreen('approvals')}
+            >
+              <View style={styles.attentionAccent} />
+              <View style={styles.attentionIcon}>
+                <Text style={styles.attentionIconText}>!</Text>
+              </View>
 
-        <Text style={styles.footer}>
-          AEROSYNC · KENYA AIRWAYS GROUND OPERATIONS
-        </Text>
+              <View style={styles.attentionInfo}>
+                <Text style={styles.attentionTitle}>Staff approvals</Text>
+                <Text style={styles.attentionDescription}>
+                  {pendingCount}{' '}
+                  {pendingCount === 1
+                    ? 'application awaiting review'
+                    : 'applications awaiting review'}
+                </Text>
+              </View>
+
+              <Text style={styles.rowArrow}>›</Text>
+            </Pressable>
+          </>
+        )}
+
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>
+            AEROSYNC  /  GROUND OPERATIONS
+          </Text>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -587,594 +514,499 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: BACKGROUND,
   },
-
-  loadingScreen: {
-    flex: 1,
-    backgroundColor: BACKGROUND,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
+  content: {
+    width: '100%',
+    maxWidth: 760,
+    alignSelf: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 34,
   },
 
-  loadingLogo: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
+  /* Header */
+  header: {
+    height: 53,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  brandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+  },
+  brandMarkSmall: {
+    width: 39,
+    height: 39,
+    borderRadius: 21,
     backgroundColor: RED,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 4,
+  },
+  brandMarkSmallText: {
+    color: WHITE,
+    fontSize: 22,
+    fontWeight: '900',
+  },
+  brandNameSmall: {
+    color: DARK,
+    fontSize: 17,
+    fontWeight: '900',
+    letterSpacing: -0.4,
+  },
+  headerRole: {
+    color: RED,
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.9,
+    marginTop: 1,
+  },
+  notificationButton: {
+    width: 38,
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notificationIcon: {
+    fontSize: 22,
+    color: DARK,
+  },
+  notificationDot: {
+    position: 'absolute',
+    top: 5,
+    right: 5,
+    width: 8,
+    height: 8,
+    borderRadius: 5,
+    backgroundColor: RED,
+    borderWidth: 1,
+    borderColor: WHITE,
   },
 
-  loadingLogoText: {
-    color: '#FFFFFF',
-    fontSize: 26,
+  /* Welcome image */
+  welcomeImage: {
+    height: 224,
+    width: '100%',
+    justifyContent: 'flex-start',
+    backgroundColor: '#8996A1',
+    overflow: 'hidden',
+  },
+  welcomeImageRadius: {
+    borderRadius: 9,
+  },
+  imageOverlay: {
+    flex: 1,
+    justifyContent: 'space-between',
+    paddingHorizontal: 19,
+    paddingTop: 19,
+    paddingBottom: 15,
+    backgroundColor: 'rgba(18, 29, 42, 0.12)',
+  },
+  welcomeCopy: {
+    alignItems: 'flex-start',
+  },
+  greeting: {
+    color: DARK,
+    fontSize: 25,
+    lineHeight: 30,
+    fontWeight: '900',
+    letterSpacing: -0.8,
+  },
+  greetingName: {
+    color: DARK,
+    fontSize: 25,
+    lineHeight: 30,
+    fontWeight: '900',
+    letterSpacing: -0.8,
+  },
+  dateText: {
+    color: '#343B43',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 8,
+  },
+  imageBottomLine: {
+    width: 34,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: RED,
+  },
+
+  /* Overlapping metrics */
+  metricsPanel: {
+    backgroundColor: WHITE,
+    borderWidth: 1,
+    borderColor: '#E6E7E9',
+    borderRadius: 15,
+    marginTop: -34,
+    marginHorizontal: 10,
+    zIndex: 2,
+    elevation: 5,
+    shadowColor: '#18202A',
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 5 },
+    paddingHorizontal: 17,
+    paddingTop: 15,
+    paddingBottom: 15,
+    marginBottom: 23,
+  },
+  metricsHeading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 15,
+  },
+  metricsTitle: {
+    color: DARK,
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: -0.2,
+  },
+  metricsSubtitle: {
+    color: MUTED,
+    fontSize: 10,
+    marginTop: 3,
+  },
+  metricsArrow: {
+    color: MUTED,
+    fontSize: 24,
+    fontWeight: '400',
+  },
+  metricsValues: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  metric: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 3,
+  },
+  metricValue: {
+    color: DARK,
+    fontSize: 28,
+    fontWeight: '900',
+    letterSpacing: -0.7,
+    fontVariant: ['tabular-nums'],
+  },
+  metricAlert: {
+    color: RED,
+  },
+  metricLabel: {
+    color: MUTED,
+    fontSize: 11,
+    marginTop: 3,
+    fontWeight: '500',
+  },
+  metricDivider: {
+    width: 1,
+    height: 39,
+    backgroundColor: BORDER,
+  },
+
+  /* Section headings */
+  sectionHeading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 2,
+    marginBottom: 10,
+  },
+  sectionTitle: {
+    color: DARK,
+    fontSize: 17,
+    fontWeight: '900',
+    letterSpacing: -0.4,
+  },
+  sectionSubtitle: {
+    color: MUTED,
+    fontSize: 10,
+    marginTop: 3,
+  },
+  viewAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingVertical: 6,
+    paddingLeft: 8,
+  },
+  viewAll: {
+    color: RED,
+    fontSize: 12,
     fontWeight: '800',
   },
+  viewAllArrow: {
+    color: RED,
+    fontSize: 18,
+    marginTop: -1,
+  },
 
+  /* Flight register */
+  flightList: {
+    backgroundColor: WHITE,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 12,
+    paddingHorizontal: 13,
+    marginBottom: 22,
+  },
+  flightRow: {
+    minHeight: 59,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
+    gap: 9,
+  },
+  lastFlightRow: {
+    borderBottomWidth: 0,
+  },
+  flightMain: {
+    flex: 1,
+    minWidth: 0,
+  },
+  flightNumber: {
+    color: DARK,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  flightRoute: {
+    color: MUTED,
+    fontSize: 10,
+    marginTop: 4,
+  },
+  flightTime: {
+    color: DARK,
+    fontSize: 11,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  statusBadge: {
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 20,
+  },
+  statusText: {
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  rowArrow: {
+    color: '#9299A0',
+    fontSize: 21,
+    fontWeight: '400',
+  },
+  emptyState: {
+    minHeight: 83,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 15,
+    gap: 12,
+  },
+  emptyFlightIcon: {
+    width: 43,
+    height: 43,
+    borderRadius: 12,
+    backgroundColor: '#F8ECEF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyFlightIconText: {
+    color: RED,
+    fontSize: 21,
+  },
+  emptyFlightCopy: {
+    flex: 1,
+  },
+  emptyTitle: {
+    color: DARK,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  emptyText: {
+    color: MUTED,
+    fontSize: 10,
+    lineHeight: 15,
+    marginTop: 4,
+  },
+
+  /* Needs attention */
+  attentionCount: {
+    minWidth: 25,
+    height: 25,
+    borderRadius: 13,
+    backgroundColor: '#FCEBED',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  attentionCountText: {
+    color: RED,
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  attentionRow: {
+    minHeight: 69,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: WHITE,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    gap: 11,
+    overflow: 'hidden',
+  },
+  attentionAccent: {
+    width: 3,
+    alignSelf: 'stretch',
+    backgroundColor: RED,
+    marginLeft: -12,
+  },
+  attentionIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#FCEBED',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attentionIconText: {
+    color: RED,
+    fontSize: 19,
+    fontWeight: '900',
+  },
+  attentionInfo: {
+    flex: 1,
+  },
+  attentionTitle: {
+    color: DARK,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  attentionDescription: {
+    color: MUTED,
+    fontSize: 10,
+    marginTop: 4,
+  },
+
+  /* Footer */
+  footer: {
+    alignItems: 'center',
+    marginTop: 25,
+    paddingTop: 13,
+    borderTopWidth: 1,
+    borderTopColor: BORDER,
+  },
+  footerText: {
+    color: '#A0A5AA',
+    fontSize: 8,
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
+
+  /* Loading */
+  loadingScreen: {
+    flex: 1,
+    backgroundColor: WHITE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 13,
+  },
+  loadingLogo: {
+    color: WHITE,
+    backgroundColor: RED,
+    overflow: 'hidden',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    textAlign: 'center',
+    textAlignVertical: 'center',
+    fontSize: 23,
+    fontWeight: '900',
+  },
   loadingText: {
-    color: TEXT,
-    fontSize: 14,
+    color: MUTED,
+    fontSize: 12,
   },
 
-  content: {
-    paddingHorizontal: 18,
-    paddingTop: 12,
-    paddingBottom: 30,
-    width: '100%',
-    alignSelf: 'center',
+  /* Pending account */
+  pendingScreen: {
+    flex: 1,
+    backgroundColor: BACKGROUND,
   },
-
   pendingContent: {
     padding: 22,
     paddingBottom: 40,
   },
-
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 22,
-  },
-
-  headerBrand: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    flexShrink: 1,
-  },
-
-  brandMarkSmall: {
-    width: 42,
-    height: 42,
-    borderRadius: 13,
-    backgroundColor: RED,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  brandMarkSmallText: {
-    color: '#FFFFFF',
-    fontSize: 23,
-    fontWeight: '900',
-  },
-
-  brandNameSmall: {
-    color: TEXT,
-    fontSize: 19,
-    fontWeight: '900',
-  },
-
-  headerRole: {
-    color: DEEP_RED,
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.6,
-    marginTop: 2,
-  },
-
-  liveIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 20,
-    backgroundColor: '#E8F5EF',
-  },
-
-  liveDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: GREEN,
-  },
-
-  liveText: {
-    color: GREEN,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-
-  greetingBlock: {
-    marginBottom: 18,
-  },
-
-  greeting: {
-    color: TEXT,
-    fontSize: 26,
-    lineHeight: 33,
-    fontWeight: '900',
-  },
-
-  subtitle: {
-    color: MUTED,
-    fontSize: 14,
-    lineHeight: 21,
-    marginTop: 5,
-  },
-
-  heroCard: {
-    backgroundColor: RED,
-    borderRadius: 22,
-    padding: 20,
-    marginBottom: 18,
-  },
-
-  heroTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-
-  heroTextBlock: {
-    flex: 1,
-    paddingRight: 8,
-  },
-
-  heroEyebrow: {
-    color: '#FFFFFF',
-    opacity: 0.9,
-    fontSize: 10,
-    fontWeight: '900',
-    letterSpacing: 1.1,
-    marginBottom: 8,
-  },
-
-  heroTitle: {
-    color: '#FFFFFF',
-    fontSize: 23,
-    lineHeight: 29,
-    fontWeight: '900',
-  },
-
-  heroSubtitle: {
-    color: '#FFFFFF',
-    opacity: 0.95,
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 7,
-  },
-
-  planeCircle: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  planeText: {
-    color: '#FFFFFF',
-    fontSize: 25,
-  },
-
-  heroDivider: {
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.3)',
-    marginVertical: 18,
-  },
-
-  heroFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-
-  heroMetric: {
-    flex: 1,
-    alignItems: 'flex-start',
-  },
-
-  heroMetricLabel: {
-    color: '#FFFFFF',
-    fontSize: 8,
-    fontWeight: '800',
-    letterSpacing: 0.4,
-  },
-
-  heroMetricValue: {
-    color: '#FFFFFF',
-    fontSize: 23,
-    fontWeight: '900',
-    marginTop: 3,
-  },
-
-  heroMetricDivider: {
-    width: 1,
-    height: 34,
-    backgroundColor: 'rgba(255,255,255,0.35)',
-    marginHorizontal: 9,
-  },
-
-  attentionCard: {
-    backgroundColor: '#FFF0F1',
-    borderWidth: 1,
-    borderColor: '#F5C7CC',
-    borderRadius: 16,
-    padding: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-
-  attentionIcon: {
+  brandMark: {
     width: 40,
     height: 40,
-    borderRadius: 12,
-    backgroundColor: '#FBD9DE',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  attentionIconText: {
-    color: DEEP_RED,
-    fontSize: 20,
-    fontWeight: '900',
-  },
-
-  attentionInfo: {
-    flex: 1,
-    marginLeft: 11,
-    marginRight: 8,
-  },
-
-  attentionTitle: {
-    color: DEEP_RED,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-
-  attentionText: {
-    color: '#8B414A',
-    fontSize: 11,
-    lineHeight: 16,
-    marginTop: 3,
-  },
-
-  attentionArrow: {
-    color: DEEP_RED,
-    fontSize: 25,
-    fontWeight: '700',
-  },
-
-  sectionHeader: {
-    marginTop: 14,
-    marginBottom: 12,
-  },
-
-  sectionTitle: {
-    color: TEXT,
-    fontSize: 19,
-    fontWeight: '900',
-  },
-
-  sectionSubtitle: {
-    color: MUTED,
-    fontSize: 12,
-    marginTop: 4,
-  },
-
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-
-  statCard: {
-    width: '48%',
-    flexGrow: 1,
-    minWidth: 130,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 17,
-    padding: 15,
-  },
-
-  statIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    backgroundColor: PALE_RED,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 10,
-  },
-
-  statIconText: {
-    color: DEEP_RED,
-    fontSize: 20,
-    fontWeight: '900',
-  },
-
-  statNumber: {
-    color: TEXT,
-    fontSize: 28,
-    fontWeight: '900',
-  },
-
-  statLabel: {
-    color: MUTED,
-    fontSize: 12,
-    lineHeight: 17,
-    marginTop: 3,
-  },
-
-  comingSoon: {
-    color: DEEP_RED,
-    fontSize: 9,
-    fontWeight: '800',
-    marginTop: 7,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
-
-  actionList: {
-    gap: 10,
-  },
-
-  actionCard: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 17,
-    padding: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-
-  actionIcon: {
-    width: 45,
-    height: 45,
-    borderRadius: 13,
-    backgroundColor: PALE_RED,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  actionIconText: {
-    color: DEEP_RED,
-    fontSize: 22,
-    fontWeight: '900',
-  },
-
-  actionInfo: {
-    flex: 1,
-    marginLeft: 12,
-    marginRight: 8,
-  },
-
-  actionTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    flexWrap: 'wrap',
-  },
-
-  actionTitle: {
-    color: TEXT,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-
-  actionDescription: {
-    color: MUTED,
-    fontSize: 11,
-    lineHeight: 17,
-    marginTop: 4,
-  },
-
-  actionBadge: {
-    minWidth: 21,
-    height: 21,
-    paddingHorizontal: 6,
-    borderRadius: 11,
-    backgroundColor: PALE_RED,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  actionBadgeText: {
-    color: DEEP_RED,
-    fontSize: 10,
-    fontWeight: '900',
-  },
-
-  actionArrow: {
-    color: DEEP_RED,
-    fontSize: 26,
-    fontWeight: '700',
-  },
-
-  accountCard: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 17,
-    padding: 15,
-    marginTop: 22,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-
-  accountAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    borderRadius: 20,
     backgroundColor: RED,
     alignItems: 'center',
     justifyContent: 'center',
   },
-
-  accountAvatarText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '900',
-  },
-
-  accountInfo: {
-    flex: 1,
-    marginLeft: 11,
-  },
-
-  accountLabel: {
-    color: DEEP_RED,
-    fontSize: 9,
-    fontWeight: '900',
-    letterSpacing: 0.7,
-  },
-
-  accountEmail: {
-    color: MUTED,
-    fontSize: 12,
-    marginTop: 4,
-  },
-
-  pressed: {
-    opacity: 0.72,
-    transform: [{ scale: 0.99 }],
-  },
-
-  brandRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 11,
-    marginTop: 8,
-    marginBottom: 30,
-  },
-
-  brandMark: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: RED,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
   brandMarkText: {
-    color: '#FFFFFF',
-    fontSize: 23,
+    color: WHITE,
+    fontSize: 21,
     fontWeight: '900',
   },
-
   brandName: {
-    color: TEXT,
-    fontSize: 18,
+    color: DARK,
+    fontSize: 17,
     fontWeight: '900',
   },
-
   brandSubtext: {
-    color: DEEP_RED,
-    fontSize: 9,
+    color: RED,
+    fontSize: 8,
     fontWeight: '700',
     marginTop: 3,
   },
-
   pendingHero: {
-    alignItems: 'center',
-    paddingHorizontal: 12,
+    marginTop: 38,
     marginBottom: 25,
   },
-
-  pendingIcon: {
-    width: 70,
-    height: 70,
-    borderRadius: 24,
-    backgroundColor: PALE_RED,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 18,
+  pendingEyebrow: {
+    color: RED,
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 1,
+    marginBottom: 9,
   },
-
-  pendingIconText: {
-    fontSize: 30,
-  },
-
   pendingTitle: {
-    color: TEXT,
+    color: DARK,
     fontSize: 24,
-    fontWeight: '900',
-    textAlign: 'center',
+    fontWeight: '800',
   },
-
-  pendingSubtitle: {
+  pendingDescription: {
     color: MUTED,
     fontSize: 13,
     lineHeight: 20,
-    textAlign: 'center',
     marginTop: 9,
   },
-
-  infoCard: {
-    backgroundColor: '#FFFFFF',
+  pendingAccount: {
+    backgroundColor: WHITE,
     borderWidth: 1,
     borderColor: BORDER,
-    borderRadius: 17,
-    padding: 18,
+    borderRadius: 10,
+    padding: 15,
   },
-
-  cardEyebrow: {
-    color: DEEP_RED,
-    fontSize: 10,
-    fontWeight: '900',
-    letterSpacing: 1,
+  pendingLabel: {
+    color: MUTED,
+    fontSize: 9,
+    fontWeight: '800',
     marginBottom: 7,
   },
-
-  cardTitle: {
-    color: TEXT,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-
-  accountStatusRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 9,
-    gap: 7,
-  },
-
-  pendingDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: RED,
-  },
-
-  accountStatusText: {
-    color: MUTED,
-    fontSize: 11,
-  },
-
-  footer: {
-    textAlign: 'center',
-    color: MUTED,
-    fontSize: 10,
+  pendingName: {
+    color: DARK,
+    fontSize: 13,
     fontWeight: '700',
-    letterSpacing: 1,
-    marginTop: 24,
+  },
+  pendingStatus: {
+    color: RED,
+    fontSize: 10,
+    marginTop: 8,
   },
 });

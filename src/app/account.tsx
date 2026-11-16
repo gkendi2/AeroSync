@@ -1,4 +1,3 @@
-
 import { signOut } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
@@ -18,10 +17,6 @@ import { auth, db } from '@/lib/firebase';
 
 const RED = '#F0182B';
 const DEEP_RED = '#B51F3A';
-const BG = '#F5F5F6';
-const TEXT = '#292929';
-const MUTED = '#737373';
-const BORDER = '#E7E7E9';
 const GREEN = '#15803D';
 
 type UserRole = 'pending' | 'handler' | 'supervisor' | '';
@@ -186,6 +181,7 @@ export default function AccountScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
+        {/* PAGE HEADER */}
         <View style={styles.header}>
           <Text style={styles.eyebrow}>AEROSYNC</Text>
 
@@ -196,6 +192,7 @@ export default function AccountScreen() {
           </Text>
         </View>
 
+        {/* PROFILE CARD */}
         <View style={styles.profileCard}>
           <View style={styles.profileTop}>
             <View style={styles.avatar}>
@@ -249,6 +246,7 @@ export default function AccountScreen() {
           </View>
         </View>
 
+        {/* ACCOUNT INFORMATION */}
         <Text style={styles.sectionTitle}>
           Account information
         </Text>
@@ -298,6 +296,7 @@ export default function AccountScreen() {
           </View>
         </View>
 
+        {/* AEROSYNC INFORMATION */}
         <Text style={styles.sectionTitle}>AeroSync</Text>
 
         <View style={styles.menuCard}>
@@ -318,7 +317,10 @@ export default function AccountScreen() {
             </View>
 
             <View style={styles.menuText}>
-              <Text style={styles.menuTitle}>About AeroSync</Text>
+              <Text style={styles.menuTitle}>
+                About AeroSync
+              </Text>
+
               <Text style={styles.menuSubtitle}>
                 Ground operations platform
               </Text>
@@ -346,7 +348,10 @@ export default function AccountScreen() {
             </View>
 
             <View style={styles.menuText}>
-              <Text style={styles.menuTitle}>Help & Support</Text>
+              <Text style={styles.menuTitle}>
+                Help & Support
+              </Text>
+
               <Text style={styles.menuSubtitle}>
                 Get assistance with AeroSync
               </Text>
@@ -356,6 +361,7 @@ export default function AccountScreen() {
           </Pressable>
         </View>
 
+        {/* SIGN OUT */}
         <View style={styles.signOutSection}>
           <Pressable
             style={({ pressed }) => [
@@ -385,7 +391,7 @@ export default function AccountScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: BG,
+    backgroundColor: '#F5F5F6',
   },
 
   loadingScreen: {
@@ -393,10 +399,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 12,
+    backgroundColor: '#F5F5F6',
   },
 
   loadingText: {
-    color: TEXT,
+    color: '#292929',
     fontSize: 14,
   },
 
@@ -425,14 +432,14 @@ const styles = StyleSheet.create({
     fontSize: 32,
     lineHeight: 38,
     fontWeight: '800',
-    color: TEXT,
+    color: '#292929',
   },
 
   subtitle: {
     marginTop: 7,
     fontSize: 15,
     lineHeight: 22,
-    color: MUTED,
+    color: '#737373',
   },
 
   profileCard: {
@@ -440,7 +447,7 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     padding: 20,
     borderWidth: 1,
-    borderColor: BORDER,
+    borderColor: '#E7E7E9',
     shadowColor: '#000000',
     shadowOpacity: 0.06,
     shadowRadius: 14,
@@ -477,14 +484,14 @@ const styles = StyleSheet.create({
   name: {
     fontSize: 20,
     fontWeight: '800',
-    color: TEXT,
+    color: '#292929',
   },
 
   email: {
     marginTop: 4,
     fontSize: 13,
     lineHeight: 18,
-    color: MUTED,
+    color: '#737373',
   },
 
   activeRow: {
@@ -517,7 +524,7 @@ const styles = StyleSheet.create({
 
   divider: {
     height: 1,
-    backgroundColor: BORDER,
+    backgroundColor: '#E7E7E9',
     marginVertical: 18,
   },
 
@@ -531,14 +538,14 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '800',
     letterSpacing: 1.1,
-    color: MUTED,
+    color: '#737373',
   },
 
   roleValue: {
     marginTop: 4,
     fontSize: 16,
     fontWeight: '700',
-    color: TEXT,
+    color: '#292929',
   },
 
   roleBadge: {
@@ -560,7 +567,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     fontSize: 14,
     fontWeight: '800',
-    color: TEXT,
+    color: '#292929',
   },
 
   infoCard: {
@@ -568,7 +575,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     paddingHorizontal: 16,
     borderWidth: 1,
-    borderColor: BORDER,
+    borderColor: '#E7E7E9',
   },
 
   infoRow: {
@@ -599,19 +606,19 @@ const styles = StyleSheet.create({
 
   infoLabel: {
     fontSize: 12,
-    color: MUTED,
+    color: '#737373',
     marginBottom: 3,
   },
 
   infoValue: {
     fontSize: 15,
     fontWeight: '700',
-    color: TEXT,
+    color: '#292929',
   },
 
   infoDivider: {
     height: 1,
-    backgroundColor: BORDER,
+    backgroundColor: '#E7E7E9',
     marginHorizontal: 2,
   },
 
@@ -619,7 +626,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: BORDER,
+    borderColor: '#E7E7E9',
     overflow: 'hidden',
   },
 
@@ -631,7 +638,7 @@ const styles = StyleSheet.create({
   },
 
   menuRowPressed: {
-    backgroundColor: '#FFF5F5',
+    backgroundColor: '#FDECEF',
   },
 
   menuIcon: {
@@ -657,19 +664,19 @@ const styles = StyleSheet.create({
   menuTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: TEXT,
+    color: '#292929',
   },
 
   menuSubtitle: {
     marginTop: 3,
     fontSize: 12,
-    color: MUTED,
+    color: '#737373',
   },
 
   chevron: {
     fontSize: 27,
     lineHeight: 27,
-    color: '#999999',
+    color: '#737373',
     marginLeft: 10,
   },
 
@@ -690,7 +697,7 @@ const styles = StyleSheet.create({
   },
 
   signOutPressed: {
-    backgroundColor: '#FFF5F5',
+    backgroundColor: '#FDECEF',
   },
 
   signOutDisabled: {
@@ -706,7 +713,7 @@ const styles = StyleSheet.create({
   footer: {
     marginTop: 16,
     fontSize: 11,
-    color: MUTED,
+    color: '#737373',
     textAlign: 'center',
   },
 });

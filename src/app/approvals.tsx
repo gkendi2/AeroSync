@@ -1,3 +1,4 @@
+
 import { auth, db } from '@/lib/firebase';
 import { useRouter } from 'expo-router';
 import {
@@ -9,7 +10,7 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -28,22 +29,86 @@ type Applicant = {
   email?: string;
   role: string;
   requestedRole?: string;
+  createdAt?: any;
+  approvedAt?: any;
+  rejectedAt?: any;
 };
+
+type ApprovalTab = 'pending' | 'approved' | 'rejected';
 
 const ADMIN_UID = '1IN8y6QDe4WyqGhMXXG3OzRtSWE3';
 
-// AeroSync theme
-const DARK = '#252525';
 const RED = '#C8102E';
-const BG = '#F4F3F3';
+const DARK = '#252525';
 const MUTED = '#777777';
-const BORDER = '#EAEAEA';
+const BG = '#F5F5F6';
 const WHITE = '#FFFFFF';
-const GREEN = '#15803D';
-const GREEN_BG = '#ECFDF3';
-const RED_BG = '#FDE9EC';
-const ORANGE = '#B45309';
-const ORANGE_BG = '#FFF7ED';
+const BORDER = '#EAEAEA';
+const GREEN = '#16834A';
+
+function getDateValue(value: any): Date | null {
+  if (!value) return null;
+
+  if (typeof value.toDate === 'function') {
+    return value.toDate();
+  }
+
+  if (value instanceof Date) {
+    return value;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatRelativeDate(value: any): string {
+  const date = getDateValue(value);
+  if (!date) return 'Date unavailable';
+
+  const difference = Date.now() - date.getTime();
+  const days = Math.floor(difference / (1000 * 60 * 60 * 24));
+
+  if (days <= 0) return 'Today';
+  if (days === 1) return '1 day ago';
+  if (days < 30) return `${days} days ago`;
+
+  const months = Math.floor(days / 30);
+  if (months === 1) return '1 month ago';
+  if (months < 12) return `${months} months ago`;
+
+  const years = Math.floor(months / 12);
+  return years === 1 ? '1 year ago' : `${years} years ago`;
+}
+
+function formatFullDate(value: any): string {
+  const date = getDateValue(value);
+  if (!date) return 'Not available';
+
+  return date.toLocaleString(undefined, {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function getInitials(name?: string, email?: string) {
+  const value = name || email || '?';
+
+  return value
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join('');
+}
+
+function getRoleName(role?: string) {
+  if (role === 'handler') return 'Handler';
+  if (role === 'supervisor') return 'Supervisor';
+  return role || 'Role not specified';
+}
 
 export default function ApprovalsScreen({
   onBack,
@@ -52,8 +117,16 @@ export default function ApprovalsScreen({
 }) {
   const router = useRouter();
   const currentUser = auth.currentUser;
-
   const isAdmin = currentUser?.uid === ADMIN_UID;
+
+  const [activeTab, setActiveTab] = useState<ApprovalTab>('pending');
+  const [pending, setPending] = useState<Applicant[]>([]);
+  const [approved, setApproved] = useState<Applicant[]>([]);
+  const [rejected, setRejected] = useState<Applicant[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [processingUid, setProcessingUid] = useState<string | null>(null);
+  const [expandedUid, setExpandedUid] = useState<string | null>(null);
 
   function handleBack() {
     if (onBack) {
@@ -63,11 +136,6 @@ export default function ApprovalsScreen({
     }
   }
 
-  const [applicants, setApplicants] = useState<Applicant[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [processingUid, setProcessingUid] = useState<string | null>(null);
-
   useEffect(() => {
     if (!currentUser) {
       setError('Please sign in to continue.');
@@ -76,59 +144,108 @@ export default function ApprovalsScreen({
     }
 
     if (currentUser.uid !== ADMIN_UID) {
-      setApplicants([]);
       setError('Only the AeroSync administrator can manage registrations.');
       setLoading(false);
       return;
     }
 
     let active = true;
+    let completedInitialLoads = 0;
+
+    const handleInitialLoad = () => {
+      completedInitialLoads += 1;
+      if (active && completedInitialLoads >= 3) {
+        setLoading(false);
+      }
+    };
+
+    const usersRef = collection(db, 'users');
 
     const pendingQuery = query(
-      collection(db, 'users'),
+      usersRef,
       where('role', '==', 'pending')
     );
 
-    const unsubscribeApplicants = onSnapshot(
-      pendingQuery,
-      (snapshot) => {
-        if (!active) return;
-
-        setApplicants(
-          snapshot.docs
-            .map((item) => ({
-              uid: item.id,
-              ...(item.data() as Omit<Applicant, 'uid'>),
-            }))
-            .filter((item) => item.uid !== ADMIN_UID)
-            .sort((a, b) =>
-              (a.displayName ?? '').localeCompare(
-                b.displayName ?? ''
-              )
-            )
-        );
-
-        setError('');
-        setLoading(false);
-      },
-      (snapshotError) => {
-        console.error(
-          'Could not load pending applicants:',
-          snapshotError
-        );
-
-        setError(
-          'Could not load applications. Check your connection and Firebase permissions.'
-        );
-        setLoading(false);
-      }
+    const approvedQuery = query(
+      usersRef,
+      where('role', 'in', ['handler', 'supervisor'])
     );
+
+    const rejectedQuery = query(
+      usersRef,
+      where('role', '==', 'rejected')
+    );
+
+    const mapApplicants = (snapshot: any): Applicant[] =>
+      snapshot.docs
+        .map((item: any) => ({
+          uid: item.id,
+          ...(item.data() as Omit<Applicant, 'uid'>),
+        }))
+        .filter((item: Applicant) => item.uid !== ADMIN_UID)
+        .sort((a: Applicant, b: Applicant) =>
+          (a.displayName || '').localeCompare(b.displayName || '')
+        );
+
+    const unsubscribers = [
+      onSnapshot(
+        pendingQuery,
+        (snapshot) => {
+          if (!active) return;
+          setPending(mapApplicants(snapshot));
+          setError('');
+          handleInitialLoad();
+        },
+        (err) => {
+          console.error('Pending applications error:', err);
+          if (!active) return;
+          setError('Could not load applications. Check your connection and Firebase permissions.');
+          setLoading(false);
+        }
+      ),
+
+      onSnapshot(
+        approvedQuery,
+        (snapshot) => {
+          if (!active) return;
+          setApproved(mapApplicants(snapshot));
+          handleInitialLoad();
+        },
+        (err) => {
+          console.error('Approved applications error:', err);
+          if (!active) return;
+          setError('Could not load approved staff. Check your Firebase permissions.');
+          setLoading(false);
+        }
+      ),
+
+      onSnapshot(
+        rejectedQuery,
+        (snapshot) => {
+          if (!active) return;
+          setRejected(mapApplicants(snapshot));
+          handleInitialLoad();
+        },
+        (err) => {
+          console.error('Rejected applications error:', err);
+          if (!active) return;
+          setError('Could not load rejected applications. Check your Firebase permissions.');
+          setLoading(false);
+        }
+      ),
+    ];
 
     return () => {
       active = false;
-      unsubscribeApplicants();
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
   }, [currentUser?.uid]);
+
+  const applicants = useMemo(() => {
+    if (activeTab === 'approved') return approved;
+    if (activeTab === 'rejected') return rejected;
+    return pending;
+  }, [activeTab, pending, approved, rejected]);
 
   function showMessage(title: string, message: string) {
     if (Platform.OS === 'web') {
@@ -143,22 +260,16 @@ export default function ApprovalsScreen({
 
     const requestedRole = applicant.requestedRole;
 
-    if (
-      requestedRole !== 'handler' &&
-      requestedRole !== 'supervisor'
-    ) {
+    if (requestedRole !== 'handler' && requestedRole !== 'supervisor') {
       showMessage(
         'Cannot approve application',
-        'This applicant has not selected a valid role. Only handler and supervisor registrations can be approved.'
+        'This applicant has not selected a valid role.'
       );
       return;
     }
 
-    const applicantName =
-      applicant.displayName || applicant.email || 'this applicant';
-
-    const roleName =
-      requestedRole === 'handler' ? 'baggage handler' : 'supervisor';
+    const applicantName = applicant.displayName || applicant.email || 'This applicant';
+    const roleName = getRoleName(requestedRole).toLowerCase();
 
     const confirmApproval = async () => {
       setProcessingUid(applicant.uid);
@@ -170,57 +281,43 @@ export default function ApprovalsScreen({
           approvedAt: serverTimestamp(),
         });
 
+        setExpandedUid(null);
         showMessage(
           'Application approved',
           `${applicantName} has been approved as a ${roleName}.`
         );
-      } catch (approvalError) {
-        console.error(
-          'Could not approve applicant:',
-          approvalError
-        );
-
+      } catch (err) {
+        console.error('Could not approve applicant:', err);
         showMessage(
           'Approval failed',
-          'The application could not be approved. Check your connection and Firebase permissions, then try again.'
+          'The application could not be approved. Check your connection and Firebase permissions.'
         );
       } finally {
         setProcessingUid(null);
       }
     };
 
-    const confirmationMessage =
-      `Are you sure you want to approve ${applicantName} as a ${roleName}?`;
+    const message = `Are you sure you want to approve ${applicantName} as a ${roleName}?`;
 
     if (Platform.OS === 'web') {
-      if (window.confirm(confirmationMessage)) {
+      if (window.confirm(message)) {
         await confirmApproval();
       }
     } else {
-      Alert.alert(
-        'Confirm approval',
-        confirmationMessage,
-        [
-          {
-            text: 'Cancel',
-            style: 'cancel',
-          },
-          {
-            text: 'Approve',
-            onPress: () => {
-              void confirmApproval();
-            },
-          },
-        ]
-      );
+      Alert.alert('Confirm approval', message, [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Approve',
+          onPress: () => void confirmApproval(),
+        },
+      ]);
     }
   }
 
   async function handleReject(applicant: Applicant) {
     if (!isAdmin || !currentUser || processingUid) return;
 
-    const applicantName =
-      applicant.displayName || applicant.email || 'this applicant';
+    const applicantName = applicant.displayName || applicant.email || 'This applicant';
 
     const confirmRejection = async () => {
       setProcessingUid(applicant.uid);
@@ -232,354 +329,246 @@ export default function ApprovalsScreen({
           rejectedAt: serverTimestamp(),
         });
 
+        setExpandedUid(null);
         showMessage(
           'Application rejected',
-          `${applicantName}'s application has been rejected. Their user record remains in Firestore.`
+          `${applicantName}'s application has been rejected.`
         );
-      } catch (rejectionError) {
-        console.error(
-          'Could not reject applicant:',
-          rejectionError
-        );
-
+      } catch (err) {
+        console.error('Could not reject applicant:', err);
         showMessage(
           'Rejection failed',
-          'The application could not be rejected. Check your connection and Firebase permissions, then try again.'
+          'The application could not be rejected. Check your connection and Firebase permissions.'
         );
       } finally {
         setProcessingUid(null);
       }
     };
 
-    const confirmationMessage =
+    const message =
       `Are you sure you want to reject ${applicantName}'s application?\n\n` +
-      'The application will disappear from the pending list, but the Firestore user record will be retained.';
+      'The user record will remain in Firestore.';
 
     if (Platform.OS === 'web') {
-      if (window.confirm(confirmationMessage)) {
+      if (window.confirm(message)) {
         await confirmRejection();
       }
     } else {
-      Alert.alert(
-        'Reject application',
-        confirmationMessage,
-        [
-          {
-            text: 'Cancel',
-            style: 'cancel',
-          },
-          {
-            text: 'Reject application',
-            style: 'destructive',
-            onPress: () => {
-              void confirmRejection();
-            },
-          },
-        ]
-      );
+      Alert.alert('Reject application', message, [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reject application',
+          style: 'destructive',
+          onPress: () => void confirmRejection(),
+        },
+      ]);
     }
   }
 
   if (!isAdmin) {
     return (
       <SafeAreaView style={styles.safeArea}>
-        <View style={styles.content}>
+        <View style={styles.accessDenied}>
           <Pressable onPress={handleBack} style={styles.backButton}>
-            <Text style={styles.backText}>← Back to dashboard</Text>
+            <Text style={styles.backText}>‹</Text>
           </Pressable>
-
-          <View style={styles.messageCard}>
-            <View style={styles.lockIcon}>
-              <Text style={styles.lockIconText}>!</Text>
-            </View>
-
-            <Text style={styles.emptyTitle}>
-              Administrator access required
-            </Text>
-
-            <Text style={styles.mutedText}>
-              Only the authorized AeroSync administrator can approve or
-              reject registrations.
-            </Text>
-          </View>
+          <Text style={styles.emptyTitle}>Administrator access required</Text>
+          <Text style={styles.mutedText}>
+            Only the authorized AeroSync administrator can manage registrations.
+          </Text>
         </View>
       </SafeAreaView>
     );
   }
 
+  const tabs: { key: ApprovalTab; label: string; count: number }[] = [
+    { key: 'pending', label: 'Pending', count: pending.length },
+    { key: 'approved', label: 'Approved', count: approved.length },
+    { key: 'rejected', label: 'Rejected', count: rejected.length },
+  ];
+
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
-        <Pressable onPress={handleBack} style={styles.backButton}>
-          <Text style={styles.backText}>← Back to dashboard</Text>
-        </Pressable>
+      <View style={styles.page}>
+        <View style={styles.header}>
+          <Pressable
+            onPress={handleBack}
+            style={styles.backButton}
+            accessibilityLabel="Go back"
+          >
+            <Text style={styles.backText}>‹</Text>
+          </Pressable>
 
-        {/* Page heading */}
-        <View style={styles.headingSection}>
-          <Text style={styles.eyebrow}>ADMINISTRATION</Text>
-
-          <Text style={styles.heading}>
-            Registration approvals
-          </Text>
-
-          <Text style={styles.subtitle}>
-            Review new staff registrations and manage access to the
-            AeroSync platform.
-          </Text>
+          <Text style={styles.heading}>Approvals</Text>
         </View>
 
-        {/* Summary */}
-        <View style={styles.summaryCard}>
-          <View style={styles.summaryTopRow}>
-            <View>
-              <Text style={styles.summaryLabel}>
-                PENDING APPLICATIONS
-              </Text>
+        <View style={styles.tabs}>
+          {tabs.map((tab) => {
+            const selected = activeTab === tab.key;
 
-              <Text style={styles.summaryNumber}>
-                {loading ? '—' : applicants.length}
-              </Text>
-
-              <Text style={styles.summaryDescription}>
-                {applicants.length === 1
-                  ? 'Application awaiting review'
-                  : 'Applications awaiting review'}
-              </Text>
-            </View>
-
-            <View style={styles.summaryIcon}>
-              <Text style={styles.summaryIconText}>✓</Text>
-            </View>
-          </View>
+            return (
+              <Pressable
+                key={tab.key}
+                onPress={() => {
+                  setActiveTab(tab.key);
+                  setExpandedUid(null);
+                }}
+                style={[styles.tab, selected && styles.activeTab]}
+              >
+                <Text style={[styles.tabText, selected && styles.activeTabText]}>
+                  {tab.label}
+                  {tab.key === 'pending' ? ` (${tab.count})` : ''}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
 
-        {/* Applications heading */}
-        <View style={styles.sectionHeading}>
-          <View>
-            <Text style={styles.sectionTitle}>
-              Applications
-            </Text>
-
-            <Text style={styles.sectionSubtitle}>
-              Review each applicant before granting access.
-            </Text>
-          </View>
-
-          <View style={styles.countBadge}>
-            <Text style={styles.countBadgeText}>
-              {loading ? '—' : applicants.length}
-            </Text>
-          </View>
-        </View>
-
-        {/* Loading */}
         {loading ? (
-          <View style={styles.messageCard}>
-            <ActivityIndicator size="large" color={RED} />
-
-            <Text style={styles.mutedText}>
-              Loading applications...
-            </Text>
+          <View style={styles.centerMessage}>
+            <ActivityIndicator color={RED} size="large" />
+            <Text style={styles.mutedText}>Loading staff applications...</Text>
           </View>
         ) : error ? (
-          <View style={styles.messageCard}>
-            <View style={styles.errorIcon}>
-              <Text style={styles.errorIconText}>!</Text>
-            </View>
-
+          <View style={styles.centerMessage}>
             <Text style={styles.errorText}>{error}</Text>
           </View>
-        ) : applicants.length === 0 ? (
-          <View style={styles.messageCard}>
-            <View style={styles.emptyIcon}>
-              <Text style={styles.emptyIconText}>✓</Text>
-            </View>
-
-            <Text style={styles.emptyTitle}>
-              All caught up!
-            </Text>
-
-            <Text style={styles.mutedText}>
-              There are no pending applications right now. New staff
-              registrations will appear here.
-            </Text>
-          </View>
         ) : (
-          <View style={styles.list}>
-            {applicants.map((applicant) => {
-              const requestedRole = applicant.requestedRole;
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={styles.list}
+            showsVerticalScrollIndicator={false}
+          >
+            {applicants.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyTitle}>
+                  {activeTab === 'pending'
+                    ? 'No pending applications'
+                    : activeTab === 'approved'
+                      ? 'No approved staff yet'
+                      : 'No rejected applications'}
+                </Text>
+                <Text style={styles.mutedText}>
+                  {activeTab === 'pending'
+                    ? 'New staff registrations will appear here.'
+                    : 'There are no records in this section yet.'}
+                </Text>
+              </View>
+            ) : (
+              applicants.map((applicant) => {
+                const expanded = expandedUid === applicant.uid;
+                const isProcessing = processingUid === applicant.uid;
 
-              const validRole =
-                requestedRole === 'handler' ||
-                requestedRole === 'supervisor';
+                const dateValue =
+                  activeTab === 'approved'
+                    ? applicant.approvedAt
+                    : activeTab === 'rejected'
+                      ? applicant.rejectedAt || applicant.createdAt
+                      : applicant.createdAt;
 
-              const isProcessing =
-                processingUid === applicant.uid;
-
-              const applicantInitial = (
-                applicant.displayName ||
-                applicant.email ||
-                '?'
-              )
-                .charAt(0)
-                .toUpperCase();
-
-              return (
-                <View
-                  key={applicant.uid}
-                  style={styles.applicantCard}
-                >
-                  {/* Applicant details */}
-                  <View style={styles.applicantHeader}>
-                    <View style={styles.avatar}>
-                      <Text style={styles.avatarText}>
-                        {applicantInitial}
-                      </Text>
-                    </View>
-
-                    <View style={styles.applicantInfo}>
-                      <Text style={styles.applicantName}>
-                        {applicant.displayName ||
-                          'Name not provided'}
-                      </Text>
-
-                      <Text style={styles.email}>
-                        {applicant.email ||
-                          'Email not available'}
-                      </Text>
-                    </View>
-
-                    <View style={styles.pendingBadge}>
-                      <View style={styles.pendingDot} />
-
-                      <Text style={styles.pendingBadgeText}>
-                        Pending
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.cardDivider} />
-
-                  {/* Requested role */}
-                  <View style={styles.roleRow}>
-                    <View>
-                      <Text style={styles.fieldLabel}>
-                        REQUESTED ROLE
-                      </Text>
-
-                      <Text style={styles.roleName}>
-                        {requestedRole
-                          ? requestedRole === 'handler'
-                            ? 'Baggage Handler'
-                            : requestedRole === 'supervisor'
-                              ? 'Supervisor'
-                              : requestedRole
-                          : 'Not specified'}
-                      </Text>
-                    </View>
-
-                    <View
-                      style={[
-                        styles.roleBadge,
-                        requestedRole === 'supervisor' &&
-                          styles.supervisorBadge,
-                      ]}
+                return (
+                  <View key={applicant.uid} style={styles.applicantItem}>
+                    <Pressable
+                      style={styles.applicantRow}
+                      onPress={() =>
+                        setExpandedUid(expanded ? null : applicant.uid)
+                      }
                     >
-                      <Text
-                        style={[
-                          styles.roleBadgeText,
-                          requestedRole === 'supervisor' &&
-                            styles.supervisorBadgeText,
-                        ]}
-                      >
-                        {requestedRole || 'Unknown role'}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {/* Actions */}
-                  {validRole ? (
-                    <View style={styles.actionRow}>
-                      <Pressable
-                        style={[
-                          styles.approveButton,
-                          processingUid !== null && styles.disabled,
-                        ]}
-                        onPress={() => handleApprove(applicant)}
-                        disabled={processingUid !== null}
-                      >
-                        {isProcessing ? (
-                          <ActivityIndicator color={WHITE} />
-                        ) : (
-                          <Text style={styles.approveButtonText}>
-                            Approve
-                          </Text>
-                        )}
-                      </Pressable>
-
-                      <Pressable
-                        style={[
-                          styles.rejectButton,
-                          processingUid !== null && styles.disabled,
-                        ]}
-                        onPress={() => handleReject(applicant)}
-                        disabled={processingUid !== null}
-                      >
-                        {isProcessing ? (
-                          <ActivityIndicator color={RED} />
-                        ) : (
-                          <Text style={styles.rejectButtonText}>
-                            Reject
-                          </Text>
-                        )}
-                      </Pressable>
-                    </View>
-                  ) : (
-                    <>
-                      <View style={styles.warningBox}>
-                        <Text style={styles.warningTitle}>
-                          Invalid registration role
-                        </Text>
-
-                        <Text style={styles.warningText}>
-                          This applicant has not selected a valid
-                          registration role. They cannot be approved
-                          until their requested role is corrected.
+                      <View style={styles.avatar}>
+                        <Text style={styles.avatarText}>
+                          {getInitials(applicant.displayName, applicant.email)}
                         </Text>
                       </View>
 
-                      <Pressable
-                        style={[
-                          styles.rejectButton,
-                          styles.fullRejectButton,
-                          processingUid !== null && styles.disabled,
-                        ]}
-                        onPress={() => handleReject(applicant)}
-                        disabled={processingUid !== null}
-                      >
-                        {isProcessing ? (
-                          <ActivityIndicator color={RED} />
-                        ) : (
-                          <Text style={styles.rejectButtonText}>
-                            Reject application
-                          </Text>
-                        )}
-                      </Pressable>
-                    </>
-                  )}
-                </View>
-              );
-            })}
-          </View>
-        )}
+                      <View style={styles.applicantInfo}>
+                        <Text style={styles.applicantName} numberOfLines={1}>
+                          {applicant.displayName || 'Name not provided'}
+                        </Text>
+                        <Text style={styles.applicantRole}>
+                          {getRoleName(
+                            activeTab === 'pending'
+                              ? applicant.requestedRole
+                              : applicant.role
+                          )}
+                        </Text>
+                      </View>
 
-        <Text style={styles.footerText}>
-          AEROSYNC · STAFF ACCESS MANAGEMENT
-        </Text>
-      </ScrollView>
+                      <Text style={styles.dateText}>
+                        {formatRelativeDate(dateValue)}
+                      </Text>
+
+                      <Text style={styles.chevron}>
+                        {expanded ? '⌄' : '›'}
+                      </Text>
+                    </Pressable>
+
+                    {expanded && (
+                      <View style={styles.details}>
+                        <View style={styles.detailRow}>
+                          <Text style={styles.detailLabel}>Email</Text>
+                          <Text style={styles.detailValue}>
+                            {applicant.email || 'Not provided'}
+                          </Text>
+                        </View>
+
+                        <View style={styles.detailRow}>
+                          <Text style={styles.detailLabel}>Requested role</Text>
+                          <Text style={styles.detailValue}>
+                            {getRoleName(applicant.requestedRole)}
+                          </Text>
+                        </View>
+
+                        <View style={styles.detailRow}>
+                          <Text style={styles.detailLabel}>
+                            {activeTab === 'approved'
+                              ? 'Approved on'
+                              : activeTab === 'rejected'
+                                ? 'Rejected / registered on'
+                                : 'Registered on'}
+                          </Text>
+                          <Text style={styles.detailValue}>
+                            {formatFullDate(dateValue)}
+                          </Text>
+                        </View>
+
+                        {activeTab === 'pending' && (
+                          <View style={styles.actionRow}>
+                            <Pressable
+                              style={[
+                                styles.approveButton,
+                                isProcessing && styles.disabled,
+                              ]}
+                              onPress={() => handleApprove(applicant)}
+                              disabled={processingUid !== null}
+                            >
+                              {isProcessing ? (
+                                <ActivityIndicator color={WHITE} />
+                              ) : (
+                                <Text style={styles.approveText}>Approve</Text>
+                              )}
+                            </Pressable>
+
+                            <Pressable
+                              style={[
+                                styles.rejectButton,
+                                isProcessing && styles.disabled,
+                              ]}
+                              onPress={() => handleReject(applicant)}
+                              disabled={processingUid !== null}
+                            >
+                              <Text style={styles.rejectText}>Reject</Text>
+                            </Pressable>
+                          </View>
+                        )}
+                      </View>
+                    )}
+                  </View>
+                );
+              })
+            )}
+          </ScrollView>
+        )}
+      </View>
     </SafeAreaView>
   );
 }
@@ -589,416 +578,209 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: BG,
   },
-
-  content: {
-    paddingHorizontal: 22,
-    paddingTop: 12,
-    paddingBottom: 40,
+  page: {
+    flex: 1,
     width: '100%',
     maxWidth: 850,
     alignSelf: 'center',
-    gap: 18,
   },
-
-  backButton: {
-    alignSelf: 'flex-start',
-    paddingVertical: 8,
-    paddingRight: 12,
-  },
-
-  backText: {
-    color: RED,
-    fontWeight: '700',
-    fontSize: 14,
-  },
-
-  headingSection: {
-    gap: 7,
-    marginTop: 2,
-    marginBottom: 4,
-  },
-
-  eyebrow: {
-    color: RED,
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 1.5,
-  },
-
-  heading: {
-    color: DARK,
-    fontSize: 27,
-    fontWeight: '800',
-    letterSpacing: -0.6,
-  },
-
-  subtitle: {
-    color: MUTED,
-    fontSize: 14,
-    lineHeight: 21,
-    maxWidth: 550,
-  },
-
-  summaryCard: {
-    backgroundColor: DARK,
-    borderRadius: 18,
-    padding: 22,
-    marginTop: 2,
-    overflow: 'hidden',
-  },
-
-  summaryTopRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-
-  summaryLabel: {
-    color: '#D0D0D0',
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 1.1,
-  },
-
-  summaryNumber: {
-    color: WHITE,
-    fontSize: 40,
-    fontWeight: '800',
-    marginTop: 7,
-  },
-
-  summaryDescription: {
-    color: '#C8C8C8',
-    fontSize: 13,
-    marginTop: 2,
-  },
-
-  summaryIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
-    backgroundColor: RED,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  summaryIconText: {
-    color: WHITE,
-    fontSize: 25,
-    fontWeight: '800',
-  },
-
-  sectionHeading: {
+  header: {
+    height: 62,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 5,
-  },
-
-  sectionTitle: {
-    color: DARK,
-    fontSize: 18,
-    fontWeight: '800',
-  },
-
-  sectionSubtitle: {
-    color: MUTED,
-    fontSize: 12,
-    marginTop: 4,
-  },
-
-  countBadge: {
-    minWidth: 32,
-    height: 32,
-    paddingHorizontal: 9,
-    borderRadius: 10,
-    backgroundColor: RED_BG,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  countBadgeText: {
-    color: RED,
-    fontSize: 13,
-    fontWeight: '800',
-  },
-
-  list: {
+    paddingHorizontal: 20,
     gap: 14,
-  },
-
-  applicantCard: {
     backgroundColor: WHITE,
-    borderRadius: 16,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: BORDER,
-    gap: 16,
   },
-
-  applicantHeader: {
+  backButton: {
+    width: 28,
+    height: 40,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+  },
+  backText: {
+    fontSize: 34,
+    lineHeight: 38,
+    color: DARK,
+    fontWeight: '400',
+  },
+  heading: {
+    fontSize: 21,
+    fontWeight: '800',
+    color: DARK,
+  },
+  tabs: {
+    flexDirection: 'row',
+    backgroundColor: WHITE,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
+  },
+  tab: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 17,
+    borderBottomWidth: 3,
+    borderBottomColor: 'transparent',
+  },
+  activeTab: {
+    borderBottomColor: RED,
+  },
+  tabText: {
+    color: MUTED,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  activeTabText: {
+    color: RED,
+    fontWeight: '800',
+  },
+  scroll: {
+    flex: 1,
+  },
+  list: {
+    paddingHorizontal: 18,
+    paddingTop: 8,
+    paddingBottom: 30,
+  },
+  applicantItem: {
+    backgroundColor: WHITE,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
+  },
+  applicantRow: {
+    minHeight: 76,
     flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: 3,
     gap: 12,
   },
-
   avatar: {
-    width: 46,
-    height: 46,
-    borderRadius: 14,
-    backgroundColor: RED_BG,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#F4E3E6',
     alignItems: 'center',
     justifyContent: 'center',
   },
-
   avatarText: {
     color: RED,
+    fontSize: 15,
     fontWeight: '800',
-    fontSize: 19,
   },
-
   applicantInfo: {
     flex: 1,
     gap: 4,
   },
-
   applicantName: {
     color: DARK,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '800',
   },
-
-  email: {
+  applicantRole: {
     color: MUTED,
     fontSize: 12,
   },
-
-  pendingBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: ORANGE_BG,
-    paddingHorizontal: 9,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-
-  pendingDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: ORANGE,
-  },
-
-  pendingBadgeText: {
-    color: ORANGE,
-    fontSize: 10,
-    fontWeight: '800',
-  },
-
-  cardDivider: {
-    height: 1,
-    backgroundColor: BORDER,
-  },
-
-  roleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 10,
-  },
-
-  fieldLabel: {
+  dateText: {
     color: MUTED,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.8,
-  },
-
-  roleName: {
-    color: DARK,
-    fontSize: 14,
-    fontWeight: '700',
-    marginTop: 5,
-  },
-
-  roleBadge: {
-    backgroundColor: RED_BG,
-    paddingHorizontal: 11,
-    paddingVertical: 7,
-    borderRadius: 9,
-  },
-
-  roleBadgeText: {
-    color: RED,
-    fontWeight: '800',
     fontSize: 11,
-    textTransform: 'capitalize',
   },
-
-  supervisorBadge: {
-    backgroundColor: '#F1F1F1',
-  },
-
-  supervisorBadgeText: {
+  chevron: {
     color: DARK,
+    fontSize: 25,
+    paddingLeft: 2,
   },
-
+  details: {
+    paddingHorizontal: 60,
+    paddingBottom: 16,
+    gap: 12,
+  },
+  detailRow: {
+    gap: 3,
+  },
+  detailLabel: {
+    color: MUTED,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  detailValue: {
+    color: DARK,
+    fontSize: 13,
+  },
   actionRow: {
     flexDirection: 'row',
     gap: 10,
+    marginTop: 5,
   },
-
   approveButton: {
     flex: 1,
+    minHeight: 42,
     backgroundColor: RED,
-    borderRadius: 10,
-    paddingVertical: 13,
+    borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 46,
   },
-
-  approveButtonText: {
+  approveText: {
     color: WHITE,
-    fontWeight: '800',
     fontSize: 13,
+    fontWeight: '800',
   },
-
   rejectButton: {
     flex: 1,
+    minHeight: 42,
     backgroundColor: WHITE,
     borderWidth: 1,
-    borderColor: '#F2BFC7',
-    borderRadius: 10,
-    paddingVertical: 13,
-    paddingHorizontal: 18,
+    borderColor: RED,
+    borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 46,
   },
-
-  fullRejectButton: {
-    width: '100%',
-    flex: 0,
-  },
-
-  rejectButtonText: {
+  rejectText: {
     color: RED,
-    fontWeight: '800',
     fontSize: 13,
+    fontWeight: '800',
   },
-
   disabled: {
-    opacity: 0.55,
+    opacity: 0.5,
   },
-
-  warningBox: {
-    backgroundColor: ORANGE_BG,
-    padding: 13,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#FDE2C5',
-    gap: 5,
-  },
-
-  warningTitle: {
-    color: ORANGE,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-
-  warningText: {
-    color: '#8A4B08',
-    fontSize: 12,
-    lineHeight: 18,
-  },
-
-  messageCard: {
-    backgroundColor: WHITE,
-    borderRadius: 16,
-    padding: 25,
+  centerMessage: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
-    borderWidth: 1,
-    borderColor: BORDER,
-    minHeight: 170,
+    padding: 28,
+    gap: 14,
   },
-
-  emptyIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: GREEN_BG,
+  emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
+    paddingVertical: 65,
+    paddingHorizontal: 25,
+    gap: 8,
   },
-
-  emptyIconText: {
-    color: GREEN,
-    fontSize: 24,
-    fontWeight: '800',
-  },
-
-  lockIcon: {
-    width: 46,
-    height: 46,
-    borderRadius: 14,
-    backgroundColor: RED_BG,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  lockIconText: {
-    color: RED,
-    fontSize: 23,
-    fontWeight: '800',
-  },
-
-  errorIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: RED_BG,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  errorIconText: {
-    color: RED,
-    fontSize: 22,
-    fontWeight: '800',
-  },
-
   emptyTitle: {
     color: DARK,
     fontSize: 17,
     fontWeight: '800',
     textAlign: 'center',
   },
-
   mutedText: {
     color: MUTED,
     fontSize: 13,
     textAlign: 'center',
     lineHeight: 20,
-    maxWidth: 400,
   },
-
   errorText: {
     color: RED,
     fontSize: 13,
-    lineHeight: 21,
     textAlign: 'center',
+    lineHeight: 20,
   },
-
-  footerText: {
-    color: '#A0A0A0',
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 1.2,
-    textAlign: 'center',
-    marginTop: 14,
+  accessDenied: {
+    flex: 1,
+    padding: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
   },
 });
