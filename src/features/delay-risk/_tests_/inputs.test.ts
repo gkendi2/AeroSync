@@ -76,6 +76,9 @@ describe('parsing', () => {
 
   it('reads the shift start from a range, a single time or AM/PM', () => {
     expect(parseShiftStart('2026-11-16', '08:00 - 16:00')).toEqual(at(8));
+    // Stored format written by the pickers, and the older spaced form.
+    expect(parseShiftStart('2026-11-16', '06:00-14:00')).toEqual(at(6));
+    expect(parseShiftStart('2026-11-16', '06:00 - 14:00')).toEqual(at(6));
     expect(parseShiftStart('2026-11-16', '13:30')).toEqual(at(13, 30));
     expect(parseShiftStart('2026-11-16', '1:30 PM')).toEqual(at(13, 30));
     expect(parseShiftStart('2026-11-16', 'morning')).toBeNull();

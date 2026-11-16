@@ -1,4 +1,5 @@
 
+import DateTimeField from '@/components/date-time-field';
 import { auth, db } from '@/lib/firebase';
 import {
   collection,
@@ -606,36 +607,39 @@ export default function FlightsScreen({
                 onChangeText={setDestination}
               />
 
-              <Text style={styles.formLabel}>DEPARTURE DATE (YYYY-MM-DD)</Text>
-              <TextInput
+              <Text style={styles.formLabel}>DEPARTURE DATE</Text>
+              <DateTimeField
+                mode="date"
                 style={styles.formInput}
                 value={departureDate}
-                onChangeText={setDepartureDate}
-                placeholder="YYYY-MM-DD"
+                onChange={setDepartureDate}
+                minimumDate={today}
               />
 
-              <Text style={styles.formLabel}>DEPARTURE TIME (HH:MM)</Text>
-              <TextInput
+              <Text style={styles.formLabel}>DEPARTURE TIME (24-HOUR)</Text>
+              <DateTimeField
+                mode="time"
                 style={styles.formInput}
                 value={departureTime}
-                onChangeText={setDepartureTime}
-                placeholder="HH:MM"
+                onChange={setDepartureTime}
               />
 
-              <Text style={styles.formLabel}>ARRIVAL DATE</Text>
-              <TextInput
+              <Text style={styles.formLabel}>ARRIVAL DATE (OPTIONAL)</Text>
+              <DateTimeField
+                mode="date"
                 style={styles.formInput}
                 value={arrivalDate}
-                onChangeText={setArrivalDate}
-                placeholder="YYYY-MM-DD"
+                onChange={setArrivalDate}
+                clearable
               />
 
-              <Text style={styles.formLabel}>ARRIVAL TIME</Text>
-              <TextInput
+              <Text style={styles.formLabel}>ARRIVAL TIME (OPTIONAL)</Text>
+              <DateTimeField
+                mode="time"
                 style={styles.formInput}
                 value={arrivalTime}
-                onChangeText={setArrivalTime}
-                placeholder="HH:MM"
+                onChange={setArrivalTime}
+                clearable
               />
 
               <Pressable

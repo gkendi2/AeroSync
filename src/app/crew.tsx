@@ -1,3 +1,9 @@
+import DateTimeField from '@/components/date-time-field';
+import {
+  formatShiftTime,
+  splitShiftTime,
+  toDateString,
+} from '@/features/datetime/format';
 import { auth, db } from '@/lib/firebase';
 import {
   addDoc,
@@ -88,7 +94,10 @@ export default function CrewScreen({ onBack }: { onBack?: () => void }) {
   const [selectedSupervisorUid, setSelectedSupervisorUid] = useState(ADMIN_UID);
   const [flightNumber, setFlightNumber] = useState('');
   const [shiftDate, setShiftDate] = useState('');
+  // shiftTime is the stored "HH:MM-HH:MM" string; start and end feed the pickers.
   const [shiftTime, setShiftTime] = useState('');
+  const [shiftStart, setShiftStart] = useState('');
+  const [shiftEnd, setShiftEnd] = useState('');
   const [activity, setActivity] = useState(ACTIVITIES[0]);
   const [editingAssignment, setEditingAssignment] =
     useState<CrewAssignment | null>(null);
@@ -283,10 +292,23 @@ export default function CrewScreen({ onBack }: { onBack?: () => void }) {
     setFlightNumber('');
     setShiftDate('');
     setShiftTime('');
+    setShiftStart('');
+    setShiftEnd('');
     setActivity(ACTIVITIES[0]);
     setEditingAssignment(null);
     setSelectedSupervisorUid(ADMIN_UID);
     setShowAssignmentForm(false);
+  }
+
+  // The stored shiftTime is only rewritten once both times are picked, so an
+  // older value in another format survives an edit that leaves the times alone.
+  function changeShiftTimes(start: string, end: string) {
+    setShiftStart(start);
+    setShiftEnd(end);
+
+    if (start && end) {
+      setShiftTime(formatShiftTime(start, end));
+    }
   }
 
   function openAssignmentForm(handler?: Handler) {
@@ -294,6 +316,8 @@ export default function CrewScreen({ onBack }: { onBack?: () => void }) {
     setHandlerSearch('');
     setShowHandlerPicker(false);
     setEditingAssignment(null);
+    // New assignments default to today.
+    setShiftDate((current) => current || toDateString(new Date()));
     setError('');
     setShowAssignmentForm(true);
   }
@@ -317,6 +341,11 @@ export default function CrewScreen({ onBack }: { onBack?: () => void }) {
     setFlightNumber(assignment.flightNumber);
     setShiftDate(assignment.shiftDate);
     setShiftTime(assignment.shiftTime);
+
+    const shiftParts = splitShiftTime(assignment.shiftTime);
+    setShiftStart(shiftParts?.start ?? '');
+    setShiftEnd(shiftParts?.end ?? '');
+
     setActivity(assignment.activity);
 
     if (isAdmin) {
@@ -737,26 +766,38 @@ export default function CrewScreen({ onBack }: { onBack?: () => void }) {
                 style={styles.input}
               />
 
+              <Text style={styles.fieldLabel}>SHIFT DATE</Text>
+              <DateTimeField
+                mode="date"
+                style={styles.input}
+                value={shiftDate}
+                onChange={setShiftDate}
+                // Past dates are blocked for new assignments only.
+                minimumDate={
+                  editingAssignment ? undefined : toDateString(new Date())
+                }
+              />
+
               <View style={styles.shiftRow}>
                 <View style={styles.shiftField}>
-                  <Text style={styles.fieldLabel}>SHIFT DATE</Text>
-                  <TextInput
-                    value={shiftDate}
-                    onChangeText={setShiftDate}
-                    placeholder="YYYY-MM-DD"
-                    placeholderTextColor="#9299A0"
+                  <Text style={styles.fieldLabel}>SHIFT START (24-HOUR)</Text>
+                  <DateTimeField
+                    mode="time"
                     style={styles.input}
+                    value={shiftStart}
+                    onChange={(value) => changeShiftTimes(value, shiftEnd)}
+                    placeholder="Start time"
                   />
                 </View>
 
                 <View style={styles.shiftField}>
-                  <Text style={styles.fieldLabel}>SHIFT TIME</Text>
-                  <TextInput
-                    value={shiftTime}
-                    onChangeText={setShiftTime}
-                    placeholder="06:00-14:00"
-                    placeholderTextColor="#9299A0"
+                  <Text style={styles.fieldLabel}>SHIFT END (24-HOUR)</Text>
+                  <DateTimeField
+                    mode="time"
                     style={styles.input}
+                    value={shiftEnd}
+                    onChange={(value) => changeShiftTimes(shiftStart, value)}
+                    placeholder="End time"
                   />
                 </View>
               </View>
