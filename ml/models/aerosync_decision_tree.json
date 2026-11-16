@@ -1,0 +1,159 @@
+{
+  "description": "AeroSync depth-3 Decision Tree for delay-risk scoring",
+  "trained_on": "synthetic data (aerosync_modeling_dataset.csv)",
+  "sklearn_version": "1.9.1",
+  "features": [
+    "scheduled_departure_hour",
+    "load_factor_percent",
+    "staff_required",
+    "staff_availability_pct",
+    "baggage_progress_pct",
+    "unresolved_incidents",
+    "time_remaining_minutes"
+  ],
+  "threshold": 0.3,
+  "split_rule": "go left when value <= threshold, otherwise right",
+  "nodes": [
+    {
+      "id": 0,
+      "leaf": false,
+      "feature": "time_remaining_minutes",
+      "threshold": 130.5,
+      "left": 1,
+      "right": 8
+    },
+    {
+      "id": 1,
+      "leaf": false,
+      "feature": "baggage_progress_pct",
+      "threshold": 61.5,
+      "left": 2,
+      "right": 5
+    },
+    {
+      "id": 2,
+      "leaf": false,
+      "feature": "staff_availability_pct",
+      "threshold": 80.90999984741211,
+      "left": 3,
+      "right": 4
+    },
+    {
+      "id": 3,
+      "leaf": true,
+      "samples": 71,
+      "delay_probability": 0.8732394366197183
+    },
+    {
+      "id": 4,
+      "leaf": true,
+      "samples": 94,
+      "delay_probability": 0.6808510638297872
+    },
+    {
+      "id": 5,
+      "leaf": false,
+      "feature": "staff_availability_pct",
+      "threshold": 68.33499908447266,
+      "left": 6,
+      "right": 7
+    },
+    {
+      "id": 6,
+      "leaf": true,
+      "samples": 67,
+      "delay_probability": 0.6119402985074627
+    },
+    {
+      "id": 7,
+      "leaf": true,
+      "samples": 163,
+      "delay_probability": 0.2392638036809816
+    },
+    {
+      "id": 8,
+      "leaf": false,
+      "feature": "staff_availability_pct",
+      "threshold": 68.33499908447266,
+      "left": 9,
+      "right": 12
+    },
+    {
+      "id": 9,
+      "leaf": false,
+      "feature": "baggage_progress_pct",
+      "threshold": 74.5,
+      "left": 10,
+      "right": 11
+    },
+    {
+      "id": 10,
+      "leaf": true,
+      "samples": 81,
+      "delay_probability": 0.5432098765432098
+    },
+    {
+      "id": 11,
+      "leaf": true,
+      "samples": 30,
+      "delay_probability": 0.1
+    },
+    {
+      "id": 12,
+      "leaf": false,
+      "feature": "baggage_progress_pct",
+      "threshold": 43.5,
+      "left": 13,
+      "right": 14
+    },
+    {
+      "id": 13,
+      "leaf": true,
+      "samples": 35,
+      "delay_probability": 0.2571428571428571
+    },
+    {
+      "id": 14,
+      "leaf": true,
+      "samples": 255,
+      "delay_probability": 0.06666666666666667
+    }
+  ],
+  "rules": [
+    "R1: time_remaining_minutes <= 60 and baggage_progress_pct < 70",
+    "R2: time_remaining_minutes <= 90 and baggage_progress_pct < 50",
+    "R3: staff_availability_pct < 70 and time_remaining_minutes <= 120",
+    "R4: unresolved_incidents >= 2 and time_remaining_minutes <= 120"
+  ],
+  "hybrid_logic": "High: probability >= threshold and at least 2 rules triggered; Medium: probability >= threshold or at least 1 rule triggered; Low: otherwise",
+  "training_ranges": {
+    "scheduled_departure_hour": {
+      "min": 0.0,
+      "max": 23.0
+    },
+    "load_factor_percent": {
+      "min": 63.93459417514118,
+      "max": 105.0
+    },
+    "staff_required": {
+      "min": 6.0,
+      "max": 12.0
+    },
+    "staff_availability_pct": {
+      "min": 33.33,
+      "max": 100.0
+    },
+    "baggage_progress_pct": {
+      "min": 35.0,
+      "max": 100.0
+    },
+    "unresolved_incidents": {
+      "min": 0.0,
+      "max": 3.0
+    },
+    "time_remaining_minutes": {
+      "min": 21.0,
+      "max": 240.0
+    }
+  }
+}
