@@ -1,6 +1,22 @@
 
 import { auth, db } from '@/lib/firebase';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { normalizeFlightNumber } from '@/features/baggage/validation';
+import {
+  computeFlightInputs,
+  FlightLiveInputs,
+  NOT_SCORED_LABELS,
+} from '@/features/delay-risk/inputs';
+import {
+  DelayRiskFeature,
+  DelayRiskResult,
+  evaluateDelayRisk,
+  outOfTrainingRange,
+  PROBABILITY_THRESHOLD,
+  RiskLevel,
+  RULES,
+} from '@/features/delay-risk/model';
+import { useRouter } from 'expo-router';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -20,7 +36,20 @@ const BG = '#F7F7F8';
 const ORANGE = '#E6A000';
 const GREEN = '#15803D';
 
-const STALE_BAGGAGE_MINUTES = 60;
+const CLOCK_TICK_MS = 30000;
+
+const INPUT_LABELS: Record<DelayRiskFeature, string> = {
+  time_remaining_minutes: 'time remaining',
+  baggage_progress_pct: 'baggage progress',
+  staff_availability_pct: 'staff availability',
+  unresolved_incidents: 'unresolved incidents',
+};
+
+type Attendance = {
+  handlerUid: string;
+  date: string;
+  status: string;
+};
 
 type Assignment = {
   id: string;
@@ -65,16 +94,14 @@ type Incident = {
   reportedAt: Date | null;
 };
 
-type RiskLevel = 'High' | 'Medium' | 'Low';
-
 type FlightAssessment = {
   flight: Flight;
-  risk: RiskLevel;
-  warningCount: number;
-  overdueAssignments: Assignment[];
-  oldRegisteredBaggage: BaggageRecord[];
+  live: FlightLiveInputs;
+  /** Hybrid model result; null when the flight cannot be scored. */
+  result: DelayRiskResult | null;
+  risk: RiskLevel | null;
+  outOfRange: DelayRiskFeature[];
   unresolvedIncidents: Incident[];
-  highSeverityIncidents: Incident[];
 };
 
 const UNRESOLVED_INCIDENT_STATUSES = [
@@ -89,10 +116,24 @@ function localDateKey(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
-function riskColor(risk: RiskLevel) {
+function riskColor(risk: RiskLevel | null) {
   if (risk === 'High') return RED;
   if (risk === 'Medium') return ORANGE;
-  return GREEN;
+  if (risk === 'Low') return GREEN;
+  return MUTED;
+}
+
+function formatPercent(value: number | null) {
+  return value === null ? '—' : `${Math.round(value)}%`;
+}
+
+function formatTimeRemaining(minutes: number | null) {
+  if (minutes === null) return '—';
+  if (minutes < 0) return 'Past scheduled departure';
+
+  const whole = Math.floor(minutes);
+  const hours = Math.floor(whole / 60);
+  return hours > 0 ? `${hours} h ${whole % 60} min` : `${whole} min`;
 }
 
 function formatRoute(flight: Flight) {
@@ -102,101 +143,75 @@ function formatRoute(flight: Flight) {
   return 'Route unavailable';
 }
 
+function rowSummary(item: FlightAssessment) {
+  if (!item.result) {
+    return item.live.notScored
+      .map((reason) => NOT_SCORED_LABELS[reason])
+      .join(' · ');
+  }
+
+  const rules = item.result.triggeredRules;
+
+  return `Delay probability ${formatPercent(item.result.delayProbability * 100)} · ${
+    rules.length > 0 ? rules.join(', ') : 'no rules triggered'
+  }`;
+}
+
 function assessFlight(
   flight: Flight,
   assignments: Assignment[],
   baggageRecords: BaggageRecord[],
   incidents: Incident[],
+  attendance: Attendance[],
+  now: Date,
 ): FlightAssessment {
-  const flightAssignments = assignments.filter(
-    (item) => item.flightNumber === flight.flightNumber,
+  const live = computeFlightInputs(
+    flight,
+    { bags: baggageRecords, assignments, attendance, incidents },
+    now,
   );
 
-  const flightBaggage = baggageRecords.filter(
-    (item) => item.flightId === flight.id,
-  );
+  const result = live.modelInputs ? evaluateDelayRisk(live.modelInputs) : null;
 
-  const flightIncidents = incidents.filter((item) => {
-    if (item.flightId && item.flightId === flight.id) return true;
+  // Same flight match as computeFlightInputs: by Flights document id,
+  // falling back to the flight number on older reports.
+  const unresolvedIncidents = incidents.filter((item) => {
+    const belongs = item.flightId
+      ? item.flightId === flight.id
+      : normalizeFlightNumber(item.flightNumber) ===
+        normalizeFlightNumber(flight.flightNumber);
 
     return (
-      !item.flightId &&
-      item.flightNumber === flight.flightNumber
+      belongs &&
+      UNRESOLVED_INCIDENT_STATUSES.some(
+        (status) => status.toLowerCase() === item.status.toLowerCase(),
+      )
     );
   });
-
-  const unresolvedIncidents = flightIncidents.filter((item) =>
-    UNRESOLVED_INCIDENT_STATUSES.some(
-      (status) => status.toLowerCase() === item.status.toLowerCase(),
-    ),
-  );
-
-  const highSeverityIncidents = unresolvedIncidents.filter((item) => {
-    const severity = item.severity.toLowerCase();
-    return severity === 'high' || severity === 'critical';
-  });
-
-  const now = Date.now();
-
-  const overdueAssignments = flightAssignments.filter((item) => {
-    if (item.status.toLowerCase() !== 'assigned') return false;
-
-    const match = item.shiftTime.match(
-      /(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/,
-    );
-
-    if (!match || !/^\d{4}-\d{2}-\d{2}$/.test(item.shiftDate)) {
-      return false;
-    }
-
-    const [, , , endHour, endMinute] = match;
-
-    const shiftEnd = new Date(
-      `${item.shiftDate}T${endHour.padStart(2, '0')}:${endMinute}:00`,
-    ).getTime();
-
-    return Number.isFinite(shiftEnd) && shiftEnd < now;
-  });
-
-  const oldRegisteredBaggage = flightBaggage.filter((item) => {
-    if (
-      item.status.toLowerCase() !== 'registered' ||
-      !item.createdAt
-    ) {
-      return false;
-    }
-
-    const ageMinutes =
-      (now - item.createdAt.getTime()) / 60000;
-
-    return ageMinutes >= STALE_BAGGAGE_MINUTES;
-  });
-
-  let warningCount = 0;
-
-  if (overdueAssignments.length > 0) warningCount += 1;
-  if (oldRegisteredBaggage.length > 0) warningCount += 1;
-  if (unresolvedIncidents.length > 0) warningCount += 1;
-
-  const risk: RiskLevel =
-    highSeverityIncidents.length > 0 || warningCount >= 2
-      ? 'High'
-      : warningCount === 1
-        ? 'Medium'
-        : 'Low';
 
   return {
     flight,
-    risk,
-    warningCount,
-    overdueAssignments,
-    oldRegisteredBaggage,
+    live,
+    result,
+    risk: result ? result.riskLevel : null,
+    outOfRange: live.modelInputs ? outOfTrainingRange(live.modelInputs) : [],
     unresolvedIncidents,
-    highSeverityIncidents,
   };
 }
 
-export default function DelayRiskScreen() {
+export default function DelayRiskScreen({
+  onBack,
+}: {
+  onBack?: () => void;
+}) {
+  const router = useRouter();
+
+  const [now, setNow] = useState(() => new Date());
+  const [attendance, setAttendance] = useState<Attendance[]>([]);
+  const [loadingAttendance, setLoadingAttendance] = useState(
+    () => auth.currentUser !== null,
+  );
+
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [baggageRecords, setBaggageRecords] = useState<BaggageRecord[]>([]);
   const [flightsData, setFlightsData] = useState<Flight[]>([]);
@@ -255,7 +270,8 @@ export default function DelayRiskScreen() {
       (snapshot) => {
         setBaggageRecords(
           snapshot.docs.map((item) => {
-            const data = item.data();
+            // 'estimate' gives a just-registered bag a createdAt straight away.
+            const data = item.data({ serverTimestamps: 'estimate' });
             const timestamp = data.createdAt;
 
             return {
@@ -349,45 +365,65 @@ export default function DelayRiskScreen() {
     };
   }, []);
 
-  const flights = useMemo(() => {
-    const flightMap = new Map<string, Flight>();
+  // Time remaining changes without any Firestore update, so re-score on a timer.
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), CLOCK_TICK_MS);
+    return () => clearInterval(timer);
+  }, []);
 
-    flightsData.forEach((flight) => {
-      if (flight.id && flight.flightNumber.trim()) {
-        flightMap.set(flight.id, flight);
-      }
-    });
+  // Today's check-ins. Only today's records can affect staff availability:
+  // a shift on a later date has not started yet.
+  const todayKey = localDateKey(now);
 
-    assignments.forEach((assignment) => {
-      const number = assignment.flightNumber.trim();
-      if (!number) return;
+  useEffect(() => {
+    if (!auth.currentUser) return;
 
-      const exists = Array.from(flightMap.values()).some(
-        (flight) => flight.flightNumber === number,
-      );
+    const unsubscribeAttendance = onSnapshot(
+      query(collection(db, 'Attendance'), where('date', '==', todayKey)),
+      (snapshot) => {
+        setAttendance(
+          snapshot.docs.map((item) => {
+            const data = item.data();
+            return {
+              handlerUid: data.handlerUid ?? '',
+              date: data.date ?? '',
+              status: data.status ?? '',
+            };
+          }),
+        );
+        setLoadingAttendance(false);
+      },
+      (err) => {
+        console.error('Could not load attendance:', err);
+        setError('Could not load attendance records.');
+        setLoadingAttendance(false);
+      },
+    );
 
-      if (!exists) {
-        flightMap.set(`assignment-${number}`, {
-          id: `assignment-${number}`,
-          flightNumber: number,
-          origin: '',
-          destination: '',
-          departureDate: '',
-          departureTime: '',
-          status: '',
-          isDemo: true,
-        });
-      }
-    });
+    return unsubscribeAttendance;
+  }, [todayKey]);
 
-    return Array.from(flightMap.values());
-  }, [flightsData, assignments]);
+  // Only real Flights documents are assessed.
+  const flights = useMemo(
+    () =>
+      flightsData.filter(
+        (flight) => flight.id && flight.flightNumber.trim(),
+      ),
+    [flightsData],
+  );
 
   const assessments = useMemo(() => {
     return flights.map((flight) =>
-      assessFlight(flight, assignments, baggageRecords, incidents),
+      assessFlight(
+        flight,
+        assignments,
+        baggageRecords,
+        incidents,
+        attendance,
+        now,
+      ),
     );
-  }, [flights, assignments, baggageRecords, incidents]);
+  }, [flights, assignments, baggageRecords, incidents, attendance, now]);
 
   const visibleAssessments = useMemo(() => {
     if (selectedPeriod === 'All flights') return assessments;
@@ -414,15 +450,21 @@ export default function DelayRiskScreen() {
     (item) => item.risk === 'Low',
   ).length;
 
-  const totalFlights = visibleAssessments.length;
+  const notScoredAssessments = visibleAssessments.filter(
+    (item) => item.risk === null,
+  );
+
+  // Share of scored flights that are High; not-scored flights are excluded.
+  const scoredFlights =
+    visibleAssessments.length - notScoredAssessments.length;
 
   const riskPercentage =
-    totalFlights > 0
-      ? Math.round((highCount / totalFlights) * 100)
+    scoredFlights > 0
+      ? Math.round((highCount / scoredFlights) * 100)
       : 0;
 
   const flightsAtRisk = visibleAssessments
-    .filter((item) => item.risk !== 'Low')
+    .filter((item) => item.risk === 'High' || item.risk === 'Medium')
     .sort((a, b) => {
       if (a.risk === b.risk) return 0;
       return a.risk === 'High' ? -1 : 1;
@@ -436,7 +478,16 @@ export default function DelayRiskScreen() {
     loadingAssignments ||
     loadingBaggage ||
     loadingFlights ||
-    loadingIncidents;
+    loadingIncidents ||
+    loadingAttendance;
+
+  const noCrewCount = visibleAssessments.filter((item) =>
+    item.live.notScored.includes('no-crew'),
+  ).length;
+
+  const noBaggageCount = visibleAssessments.filter((item) =>
+    item.live.notScored.includes('no-baggage'),
+  ).length;
 
   const riskFactors = [
     {
@@ -462,22 +513,22 @@ export default function DelayRiskScreen() {
     {
       id: 'crew',
       title: 'Crew',
-      description: `${visibleAssessments.reduce((sum, item) => sum + item.overdueAssignments.length, 0)} overdue assignment(s)`,
+      description: `${noCrewCount} flight(s) with no crew assigned`,
       icon: '♙',
       status: 'Live data',
       color: RED,
       detail:
-        'Flags assignments that remain Assigned after their scheduled shift end.',
+        'Staff availability is the share of handlers assigned to the flight who are available: checked in today, shift not started yet, or all their assignments on the flight completed. Cancelled assignments are ignored.',
     },
     {
       id: 'baggage',
       title: 'Baggage',
-      description: `${visibleAssessments.reduce((sum, item) => sum + item.oldRegisteredBaggage.length, 0)} potentially stalled record(s)`,
+      description: `${noBaggageCount} flight(s) with no baggage registered`,
       icon: '▣',
       status: 'Live data',
       color: ORANGE,
       detail:
-        `Flags baggage records that remain Registered for at least ${STALE_BAGGAGE_MINUTES} minutes.`,
+        'Baggage progress is the share of the flight\'s bags with status Loading or Offloaded, counting bags registered in the 24 hours before scheduled departure.',
     },
     {
       id: 'incidents',
@@ -487,7 +538,7 @@ export default function DelayRiskScreen() {
       status: 'Live data',
       color: RED,
       detail:
-        'Open and Under Investigation incident reports are included in the risk assessment.',
+        'Open and Under Investigation incident reports are counted per flight. Two or more within 120 minutes of departure trigger rule R4.',
     },
   ];
 
@@ -511,6 +562,10 @@ export default function DelayRiskScreen() {
               onPress={() => {
                 if (selectedAssessment) {
                   setSelectedFlightId('');
+                } else if (onBack) {
+                  onBack();
+                } else {
+                  router.back();
                 }
               }}
               style={styles.backButton}
@@ -597,34 +652,102 @@ export default function DelayRiskScreen() {
                     ]}
                   >
                     <Text style={styles.riskBadgeText}>
-                      {selectedAssessment.risk}
+                      {selectedAssessment.risk ?? 'Not scored'}
                     </Text>
                   </View>
                 </View>
 
-                <Text style={styles.detailSectionTitle}>Risk findings</Text>
+                {selectedAssessment.result ? (
+                  <>
+                    <Text style={styles.detailSectionTitle}>Model result</Text>
 
-                {selectedAssessment.overdueAssignments.length > 0 && (
-                  <View style={styles.detailFinding}>
-                    <Text style={styles.detailFindingTitle}>Crew assignments</Text>
-                    {selectedAssessment.overdueAssignments.map((item) => (
-                      <Text key={item.id} style={styles.detailFindingText}>
-                        {item.handlerName} · {item.activity} · {item.shiftTime}
+                    <View style={styles.detailFinding}>
+                      <Text style={styles.detailFindingTitle}>
+                        Delay probability:{' '}
+                        {formatPercent(
+                          selectedAssessment.result.delayProbability * 100,
+                        )}
                       </Text>
+                      <Text style={styles.detailFindingText}>
+                        Decision tree output. The alert threshold is{' '}
+                        {formatPercent(PROBABILITY_THRESHOLD * 100)}.
+                      </Text>
+                    </View>
+
+                    <View style={styles.detailFinding}>
+                      <Text style={styles.detailFindingTitle}>
+                        Rules triggered:{' '}
+                        {selectedAssessment.result.triggeredRules.length} of{' '}
+                        {RULES.length}
+                      </Text>
+                      {RULES.filter((rule) =>
+                        selectedAssessment.result?.triggeredRules.includes(
+                          rule.id,
+                        ),
+                      ).map((rule) => (
+                        <Text key={rule.id} style={styles.detailFindingText}>
+                          {rule.text}
+                        </Text>
+                      ))}
+                      {selectedAssessment.result.triggeredRules.length === 0 && (
+                        <Text style={styles.detailFindingText}>
+                          No rules triggered.
+                        </Text>
+                      )}
+                    </View>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.detailSectionTitle}>Not scored</Text>
+                    {selectedAssessment.live.notScored.map((reason) => (
+                      <View key={reason} style={styles.warningBox}>
+                        <Text style={styles.warningText}>
+                          ⚠ {NOT_SCORED_LABELS[reason]}
+                        </Text>
+                      </View>
                     ))}
+                  </>
+                )}
+
+                {selectedAssessment.outOfRange.length > 0 && (
+                  <View style={styles.warningBox}>
+                    <Text style={styles.warningText}>
+                      Outside training range:{' '}
+                      {selectedAssessment.outOfRange
+                        .map((key) => INPUT_LABELS[key])
+                        .join(', ')}
+                      . The model saw no values like these in training, so treat
+                      this result with extra caution.
+                    </Text>
                   </View>
                 )}
 
-                {selectedAssessment.oldRegisteredBaggage.length > 0 && (
-                  <View style={styles.detailFinding}>
-                    <Text style={styles.detailFindingTitle}>Baggage handling</Text>
-                    {selectedAssessment.oldRegisteredBaggage.map((item) => (
-                      <Text key={item.id} style={styles.detailFindingText}>
-                        {item.baggageId} · Status: {item.status}
-                      </Text>
-                    ))}
-                  </View>
-                )}
+                <Text style={styles.detailSectionTitle}>Live inputs</Text>
+
+                <View style={styles.detailFinding}>
+                  <Text style={styles.detailFindingText}>
+                    Time remaining:{' '}
+                    {formatTimeRemaining(
+                      selectedAssessment.live.timeRemainingMinutes,
+                    )}
+                  </Text>
+                  <Text style={styles.detailFindingText}>
+                    Baggage progress:{' '}
+                    {formatPercent(selectedAssessment.live.baggage.pct)} (
+                    {selectedAssessment.live.baggage.handled} of{' '}
+                    {selectedAssessment.live.baggage.total} bags handled)
+                  </Text>
+                  <Text style={styles.detailFindingText}>
+                    Staff availability:{' '}
+                    {formatPercent(selectedAssessment.live.staff.pct)} (
+                    {selectedAssessment.live.staff.available} of{' '}
+                    {selectedAssessment.live.staff.assigned} handlers available)
+                  </Text>
+                  <Text style={styles.detailFindingText}>
+                    Unresolved incidents:{' '}
+                    {selectedAssessment.live.unresolvedIncidents}
+                  </Text>
+                </View>
 
                 {selectedAssessment.unresolvedIncidents.length > 0 && (
                   <View style={styles.detailFinding}>
@@ -637,14 +760,8 @@ export default function DelayRiskScreen() {
                   </View>
                 )}
 
-                {selectedAssessment.warningCount === 0 && (
-                  <Text style={styles.noWarnings}>
-                    No configured warning conditions detected in the available records.
-                  </Text>
-                )}
-
                 <Text style={styles.detailDisclaimer}>
-                  This is a provisional rule-based indicator, not a validated flight-delay prediction.
+                  The risk level combines a decision tree trained on synthetic data with operational rules R1–R4. It is not a validated flight-delay prediction.
                 </Text>
               </View>
             ) : (
@@ -675,6 +792,13 @@ export default function DelayRiskScreen() {
                     <View style={styles.legendRow}>
                       <View style={[styles.legendDot, { backgroundColor: '#B8BBC0' }]} />
                       <Text style={styles.legendText}>Low ({lowCount})</Text>
+                    </View>
+
+                    <View style={styles.legendRow}>
+                      <View style={[styles.legendDot, styles.legendDotHollow]} />
+                      <Text style={styles.legendText}>
+                        Not scored ({notScoredAssessments.length})
+                      </Text>
                     </View>
                   </View>
                 </View>
@@ -711,6 +835,9 @@ export default function DelayRiskScreen() {
                           <Text style={styles.flightRoute}>
                             {formatRoute(item.flight)}
                           </Text>
+                          <Text style={styles.flightMeta}>
+                            {rowSummary(item)}
+                          </Text>
                         </View>
 
                         <Text style={styles.flightTime}>
@@ -740,6 +867,47 @@ export default function DelayRiskScreen() {
                     ))
                   )}
                 </View>
+
+                {notScoredAssessments.length > 0 && (
+                  <View style={styles.section}>
+                    <View style={styles.sectionHeadingRow}>
+                      <Text style={styles.sectionTitle}>
+                        Not Scored ({notScoredAssessments.length})
+                      </Text>
+                    </View>
+
+                    {notScoredAssessments.map((item) => (
+                      <Pressable
+                        key={item.flight.id}
+                        onPress={() => openFlight(item)}
+                        style={({ pressed }) => [
+                          styles.flightRow,
+                          pressed && styles.pressed,
+                        ]}
+                      >
+                        <Text style={styles.airlineIcon}>✈</Text>
+
+                        <View style={styles.flightCopy}>
+                          <Text style={styles.flightNumber}>
+                            {item.flight.flightNumber}
+                          </Text>
+                          <Text style={styles.flightRoute}>
+                            {formatRoute(item.flight)}
+                          </Text>
+                          <Text style={styles.flightMeta}>
+                            {rowSummary(item)}
+                          </Text>
+                        </View>
+
+                        <Text style={styles.flightTime}>
+                          {item.flight.departureTime || '—'}
+                        </Text>
+
+                        <Text style={styles.rowChevron}>›</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
 
                 <View style={styles.section}>
                   <Text style={styles.sectionTitle}>Risk Factors</Text>
@@ -797,7 +965,7 @@ export default function DelayRiskScreen() {
 
                 <View style={styles.disclaimer}>
                   <Text style={styles.disclaimerText}>
-                    Risk assessments are provisional and based only on the operational records currently available. Weather and equipment data are not yet connected and do not contribute to the risk calculation.
+                    Delay probabilities come from a decision tree trained on synthetic data, combined with operational rules R1–R4. They are provisional and are not a validated flight-delay prediction. Weather and equipment data are not yet connected and do not contribute to the risk calculation.
                   </Text>
                 </View>
               </>
@@ -1281,6 +1449,32 @@ const styles = StyleSheet.create({
     fontSize: 10,
     lineHeight: 16,
     marginTop: 18,
+  },
+
+  flightMeta: {
+    color: MUTED,
+    fontSize: 10,
+    marginTop: 3,
+  },
+
+  legendDotHollow: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#B8BBC0',
+  },
+
+  warningBox: {
+    marginTop: 10,
+    padding: 11,
+    backgroundColor: '#FFF4DC',
+    borderRadius: 8,
+  },
+
+  warningText: {
+    color: '#7A5200',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17,
   },
 
   pressed: {

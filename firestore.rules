@@ -349,24 +349,16 @@ service cloud.firestore {
 
     match /CrewAssignments/{assignmentId} {
 
-      // Gloria can see all assignments.
-      // Other supervisors can only see their own team's assignments.
+      // Gloria and all supervisors can see all assignments
+      // (the delay-risk screen needs every team's crew per flight).
       // Handlers can only see their own assignments.
-      allow list: if isAdmin()
-        || (
-          isSupervisor()
-          && resource.data.supervisorUid == request.auth.uid
-        )
+      allow list: if isSupervisor()
         || (
           isHandler()
           && resource.data.handlerUid == request.auth.uid
         );
 
-      allow get: if isAdmin()
-        || (
-          isSupervisor()
-          && resource.data.supervisorUid == request.auth.uid
-        )
+      allow get: if isSupervisor()
         || (
           isHandler()
           && resource.data.handlerUid == request.auth.uid
@@ -569,14 +561,20 @@ service cloud.firestore {
       // A handler can read their own record.
       // A missing document can also be read so the app can
       // listen for today's record before check-in.
-      allow get: if isHandler()
-        && (
-          resource == null
-          || resource.data.handlerUid == request.auth.uid
+      // Gloria and supervisors can read all records
+      // (the delay-risk screen needs check-ins per flight).
+      allow get: if isSupervisor()
+        || (
+          isHandler()
+          && (
+            resource == null
+            || resource.data.handlerUid == request.auth.uid
+          )
         );
 
-      // Attendance is accessed by document ID, not queries.
-      allow list: if false;
+      // Handlers access attendance by document ID, not queries.
+      // Only Gloria and supervisors can query it.
+      allow list: if isSupervisor();
 
       // A handler can check in once per day.
       allow create: if isHandler()
