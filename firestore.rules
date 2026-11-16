@@ -1,0 +1,640 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --------------------------------------------------
+    // IDENTITY AND ROLE HELPERS
+    // --------------------------------------------------
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // Gloria's UID is the permanent administrator identity.
+    function isAdmin() {
+      return signedIn()
+        && request.auth.uid == '1IN8y6QDe4WyqGhMXXG3OzRtSWE3';
+    }
+
+    function userProfileExists() {
+      return signedIn()
+        && exists(
+          /databases/$(database)/documents/users/$(request.auth.uid)
+        );
+    }
+
+    function isSupervisor() {
+      return isAdmin()
+        || (
+          userProfileExists()
+          && get(
+            /databases/$(database)/documents/users/$(request.auth.uid)
+          ).data.role == 'supervisor'
+        );
+    }
+
+    function isHandler() {
+      return userProfileExists()
+        && get(
+          /databases/$(database)/documents/users/$(request.auth.uid)
+        ).data.role == 'handler';
+    }
+
+    function isApprovedStaff() {
+      return isAdmin()
+        || (
+          userProfileExists()
+          && get(
+            /databases/$(database)/documents/users/$(request.auth.uid)
+          ).data.role in ['handler', 'supervisor']
+        );
+    }
+
+    function isApprovedSupervisorUid(uid) {
+      return uid == '1IN8y6QDe4WyqGhMXXG3OzRtSWE3'
+        || (
+          exists(
+            /databases/$(database)/documents/users/$(uid)
+          )
+          && get(
+            /databases/$(database)/documents/users/$(uid)
+          ).data.role == 'supervisor'
+        );
+    }
+
+    function isApprovedHandlerUid(uid) {
+      return exists(
+        /databases/$(database)/documents/users/$(uid)
+      )
+        && get(
+          /databases/$(database)/documents/users/$(uid)
+        ).data.role == 'handler';
+    }
+
+    // --------------------------------------------------
+    // USER PROFILES AND ROLE APPROVALS
+    // --------------------------------------------------
+
+    match /users/{uid} {
+
+      allow read: if signedIn()
+        && (
+          request.auth.uid == uid
+          || isSupervisor()
+        );
+
+      // Users can register themselves only as pending.
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasAll([
+          'uid',
+          'email',
+          'displayName',
+          'role',
+          'requestedRole',
+          'createdAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'uid',
+          'email',
+          'displayName',
+          'role',
+          'requestedRole',
+          'createdAt'
+        ])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.role == 'pending'
+        && request.resource.data.requestedRole in [
+          'handler',
+          'supervisor'
+        ]
+        && request.resource.data.createdAt == request.time;
+
+      // ONLY GLORIA CAN APPROVE HANDLER APPLICATIONS.
+      allow update: if isAdmin()
+        && resource.data.role == 'pending'
+        && resource.data.requestedRole == 'handler'
+        && request.resource.data.role == 'handler'
+        && request.resource.data.diff(resource.data)
+          .affectedKeys()
+          .hasOnly([
+            'role',
+            'approvedBy',
+            'approvedAt'
+          ])
+        && request.resource.data.approvedBy == request.auth.uid
+        && request.resource.data.approvedAt == request.time;
+
+      // ONLY GLORIA CAN APPROVE SUPERVISOR APPLICATIONS.
+      allow update: if isAdmin()
+        && resource.data.role == 'pending'
+        && resource.data.requestedRole == 'supervisor'
+        && request.resource.data.role == 'supervisor'
+        && request.resource.data.diff(resource.data)
+          .affectedKeys()
+          .hasOnly([
+            'role',
+            'approvedBy',
+            'approvedAt'
+          ])
+        && request.resource.data.approvedBy == request.auth.uid
+        && request.resource.data.approvedAt == request.time;
+
+      // ONLY GLORIA CAN REJECT PENDING APPLICATIONS.
+      allow update: if isAdmin()
+        && resource.data.role == 'pending'
+        && request.resource.data.role == 'rejected'
+        && request.resource.data.diff(resource.data)
+          .affectedKeys()
+          .hasOnly([
+            'role',
+            'rejectedBy',
+            'rejectedAt'
+          ])
+        && request.resource.data.rejectedBy == request.auth.uid
+        && request.resource.data.rejectedAt == request.time;
+
+      allow delete: if false;
+    }
+
+    // --------------------------------------------------
+    // BAGGAGE RECORDS
+    // --------------------------------------------------
+
+    match /BaggageRecords/{baggageId} {
+
+      allow read: if isApprovedStaff();
+
+      // Supervisors and Gloria can create baggage records.
+      allow create: if isSupervisor();
+
+      // Supervisors and Gloria retain management access.
+      allow update: if isSupervisor();
+
+      // Handler updates must be part of the same transaction
+      // that creates the corresponding handling event.
+      allow update: if isHandler()
+        && request.resource.data.diff(resource.data)
+          .affectedKeys()
+          .hasOnly([
+            'status',
+            'lastHandlingAction',
+            'lastHandledBy',
+            'lastHandledAt',
+            'lastHandlingEventId'
+          ])
+        && (
+          (
+            resource.data.status == 'Registered'
+            && request.resource.data.status == 'Loading'
+            && request.resource.data.lastHandlingAction == 'Loading'
+          )
+          ||
+          (
+            resource.data.status == 'Loading'
+            && request.resource.data.status == 'Offloaded'
+            && request.resource.data.lastHandlingAction == 'Offloading'
+          )
+        )
+        && request.resource.data.lastHandledBy == request.auth.uid
+        && request.resource.data.lastHandledAt == request.time
+        && request.resource.data.lastHandlingEventId is string
+        && request.resource.data.lastHandlingEventId.size() > 0
+
+        // The matching event must exist after this transaction.
+        && getAfter(
+          /databases/$(database)/documents/BaggageRecords/$(baggageId)/handlingEvents/$(request.resource.data.lastHandlingEventId)
+        ).data.handlerUid == request.auth.uid
+        && getAfter(
+          /databases/$(database)/documents/BaggageRecords/$(baggageId)/handlingEvents/$(request.resource.data.lastHandlingEventId)
+        ).data.action == request.resource.data.lastHandlingAction
+        && getAfter(
+          /databases/$(database)/documents/BaggageRecords/$(baggageId)/handlingEvents/$(request.resource.data.lastHandlingEventId)
+        ).data.timestamp == request.time
+        && getAfter(
+          /databases/$(database)/documents/BaggageRecords/$(baggageId)/handlingEvents/$(request.resource.data.lastHandlingEventId)
+        ).data.baggageId == (
+          'baggageId' in resource.data
+            && resource.data.baggageId is string
+            ? resource.data.baggageId
+            : baggageId
+        )
+        && getAfter(
+          /databases/$(database)/documents/BaggageRecords/$(baggageId)/handlingEvents/$(request.resource.data.lastHandlingEventId)
+        ).data.flightId == (
+          'flightId' in resource.data
+            && resource.data.flightId is string
+            ? resource.data.flightId
+            : ''
+        );
+
+      allow delete: if false;
+
+      // --------------------------------------------------
+      // BAGGAGE HANDLING EVENTS
+      // --------------------------------------------------
+
+      match /handlingEvents/{eventId} {
+
+        allow create: if isHandler()
+          && request.resource.data.keys().hasAll([
+            'action',
+            'baggageId',
+            'flightId',
+            'handlerUid',
+            'timestamp'
+          ])
+          && request.resource.data.keys().hasOnly([
+            'action',
+            'baggageId',
+            'flightId',
+            'handlerUid',
+            'timestamp'
+          ])
+          && request.resource.data.action in [
+            'Loading',
+            'Offloading'
+          ]
+          && request.resource.data.baggageId == (
+            'baggageId' in get(
+              /databases/$(database)/documents/BaggageRecords/$(baggageId)
+            ).data
+            && get(
+              /databases/$(database)/documents/BaggageRecords/$(baggageId)
+            ).data.baggageId is string
+              ? get(
+                  /databases/$(database)/documents/BaggageRecords/$(baggageId)
+                ).data.baggageId
+              : baggageId
+          )
+          && request.resource.data.flightId == (
+            'flightId' in get(
+              /databases/$(database)/documents/BaggageRecords/$(baggageId)
+            ).data
+            && get(
+              /databases/$(database)/documents/BaggageRecords/$(baggageId)
+            ).data.flightId is string
+              ? get(
+                  /databases/$(database)/documents/BaggageRecords/$(baggageId)
+                ).data.flightId
+              : ''
+          )
+          && request.resource.data.handlerUid == request.auth.uid
+          && request.resource.data.timestamp == request.time
+
+          // Validate the action against the original bag status.
+          && (
+            (
+              request.resource.data.action == 'Loading'
+              && get(
+                /databases/$(database)/documents/BaggageRecords/$(baggageId)
+              ).data.status == 'Registered'
+            )
+            ||
+            (
+              request.resource.data.action == 'Offloading'
+              && get(
+                /databases/$(database)/documents/BaggageRecords/$(baggageId)
+              ).data.status == 'Loading'
+            )
+          )
+
+          // The parent record must point back to this event
+          // after the same transaction.
+          && getAfter(
+            /databases/$(database)/documents/BaggageRecords/$(baggageId)
+          ).data.lastHandlingEventId == eventId;
+
+        allow read, update, delete: if false;
+      }
+    }
+
+    // --------------------------------------------------
+    // INCIDENTS
+    // --------------------------------------------------
+
+
+    // --------------------------------------------------
+    // INCIDENTS
+    // --------------------------------------------------
+
+    match /Incidents/{incidentId} {
+
+      // Approved staff can submit reports.
+      allow create: if isApprovedStaff()
+        && request.resource.data.reportedBy == request.auth.uid
+        && request.resource.data.reportedAt == request.time
+        && request.resource.data.status == 'Open';
+
+      // Supervisors can view all reports.
+      // Handlers can only view their own reports.
+      allow get, list: if isSupervisor()
+        || (
+          isHandler()
+          && resource.data.reportedBy == request.auth.uid
+        );
+
+      // Only supervisors and Gloria can update reports.
+      allow update: if isSupervisor();
+
+      // Reports cannot be deleted.
+      allow delete: if false;
+    }
+
+
+    // --------------------------------------------------
+    // CREW ASSIGNMENTS
+    // --------------------------------------------------
+
+    match /CrewAssignments/{assignmentId} {
+
+      // Gloria can see all assignments.
+      // Other supervisors can only see their own team's assignments.
+      // Handlers can only see their own assignments.
+      allow list: if isAdmin()
+        || (
+          isSupervisor()
+          && resource.data.supervisorUid == request.auth.uid
+        )
+        || (
+          isHandler()
+          && resource.data.handlerUid == request.auth.uid
+        );
+
+      allow get: if isAdmin()
+        || (
+          isSupervisor()
+          && resource.data.supervisorUid == request.auth.uid
+        )
+        || (
+          isHandler()
+          && resource.data.handlerUid == request.auth.uid
+        );
+
+      // Create an assignment.
+      allow create: if isSupervisor()
+        && request.resource.data.keys().hasAll([
+          'handlerUid',
+          'handlerName',
+          'flightNumber',
+          'shiftDate',
+          'shiftTime',
+          'activity',
+          'status',
+          'assignedBy',
+          'createdAt',
+          'supervisorUid'
+        ])
+        && request.resource.data.handlerUid is string
+        && isApprovedHandlerUid(request.resource.data.handlerUid)
+        && request.resource.data.handlerName is string
+        && request.resource.data.flightNumber is string
+        && request.resource.data.shiftDate is string
+        && request.resource.data.shiftTime is string
+        && request.resource.data.activity is string
+        && request.resource.data.status == 'Assigned'
+        && request.resource.data.assignedBy == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.supervisorUid is string
+        && isApprovedSupervisorUid(request.resource.data.supervisorUid)
+        && (
+          // Other supervisors can only assign to themselves.
+          isAdmin()
+          || request.resource.data.supervisorUid == request.auth.uid
+        );
+
+      // Supervisors can edit their own assignments.
+      // Only Gloria can edit any assignment or change its supervisor.
+      // Cancellation is recorded as a status, not deletion.
+      allow update: if isSupervisor()
+
+        // Only the assignment's supervisor or Gloria can edit it.
+        && (
+          isAdmin()
+          || resource.data.supervisorUid == request.auth.uid
+        )
+
+        // Limit the fields that supervisors may change.
+        && request.resource.data.diff(resource.data)
+          .affectedKeys()
+          .hasOnly([
+            'handlerUid',
+            'handlerName',
+            'flightNumber',
+            'shiftDate',
+            'shiftTime',
+            'activity',
+            'status',
+            'supervisorUid',
+            'updatedBy',
+            'updatedAt'
+          ])
+
+        // Audit fields are compulsory for every supervisor edit.
+        && request.resource.data.keys().hasAll([
+          'updatedBy',
+          'updatedAt'
+        ])
+        && request.resource.data.updatedBy == request.auth.uid
+        && request.resource.data.updatedAt == request.time
+
+        // Non-admin supervisors cannot change assignment ownership.
+        && (
+          isAdmin()
+          || (
+            request.resource.data.supervisorUid == request.auth.uid
+            && !request.resource.data.diff(resource.data)
+              .affectedKeys()
+              .hasAny(['supervisorUid'])
+          )
+        )
+
+        // Any supervisor assigned by the admin must be approved.
+        && request.resource.data.supervisorUid is string
+        && isApprovedSupervisorUid(request.resource.data.supervisorUid)
+
+        // The handler must remain an approved handler.
+        && request.resource.data.handlerUid is string
+        && isApprovedHandlerUid(request.resource.data.handlerUid)
+
+        // Supervisors can edit active assignments or cancel them.
+        // They cannot edit completed or already cancelled assignments.
+        && resource.data.status in [
+          'Assigned',
+          'In Progress'
+        ]
+        && (
+          request.resource.data.status == resource.data.status
+          || request.resource.data.status == 'Cancelled'
+        )
+
+        // Validate the editable text fields.
+        && request.resource.data.handlerName is string
+        && request.resource.data.flightNumber is string
+        && request.resource.data.shiftDate is string
+        && request.resource.data.shiftTime is string
+        && request.resource.data.activity is string;
+
+      // Handlers can update only their own task status
+      // and legacy assignment attendance fields.
+      allow update: if isHandler()
+        && resource.data.handlerUid == request.auth.uid
+        && (
+          // TASK STATUS
+          (
+            request.resource.data.diff(resource.data)
+              .affectedKeys()
+              .hasOnly(['status'])
+            && (
+              (
+                resource.data.status == 'Assigned'
+                && request.resource.data.status == 'In Progress'
+              )
+              ||
+              (
+                resource.data.status == 'In Progress'
+                && request.resource.data.status == 'Completed'
+              )
+            )
+          )
+
+          ||
+
+          // LEGACY CHECK IN
+          (
+            request.resource.data.diff(resource.data)
+              .affectedKeys()
+              .hasOnly([
+                'checkInAt',
+                'attendanceStatus'
+              ])
+            && (
+              !('checkInAt' in resource.data)
+              || resource.data.checkInAt == null
+            )
+            && (
+              !('attendanceStatus' in resource.data)
+              || resource.data.attendanceStatus == 'Not Checked In'
+            )
+            && request.resource.data.checkInAt == request.time
+            && request.resource.data.attendanceStatus == 'Checked In'
+          )
+
+          ||
+
+          // LEGACY CHECK OUT
+          (
+            request.resource.data.diff(resource.data)
+              .affectedKeys()
+              .hasOnly([
+                'checkOutAt',
+                'attendanceStatus'
+              ])
+            && resource.data.attendanceStatus == 'Checked In'
+            && (
+              !('checkOutAt' in resource.data)
+              || resource.data.checkOutAt == null
+            )
+            && request.resource.data.checkOutAt == request.time
+            && request.resource.data.attendanceStatus == 'Checked Out'
+          )
+        );
+
+      allow delete: if false;
+    }
+
+    // --------------------------------------------------
+    // FLIGHTS
+    // --------------------------------------------------
+
+    match /Flights/{flightId} {
+
+      // Approved supervisors and handlers can view flights.
+      allow read: if isApprovedStaff();
+
+      // Only supervisors and Gloria can create or update flights.
+      allow create, update: if isSupervisor();
+
+      // Flights are cancelled or completed, not deleted.
+      allow delete: if false;
+    }
+
+    // --------------------------------------------------
+    // DAILY HANDLER ATTENDANCE
+    // --------------------------------------------------
+
+    match /Attendance/{attendanceId} {
+
+      // A handler can read their own record.
+      // A missing document can also be read so the app can
+      // listen for today's record before check-in.
+      allow get: if isHandler()
+        && (
+          resource == null
+          || resource.data.handlerUid == request.auth.uid
+        );
+
+      // Attendance is accessed by document ID, not queries.
+      allow list: if false;
+
+      // A handler can check in once per day.
+      allow create: if isHandler()
+        && request.resource.data.date is string
+        && attendanceId == request.auth.uid + '_' + request.resource.data.date
+        && request.resource.data.keys().hasAll([
+          'handlerUid',
+          'handlerName',
+          'date',
+          'status',
+          'checkInAt',
+          'checkOutAt',
+          'createdAt',
+          'updatedAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'handlerUid',
+          'handlerName',
+          'date',
+          'status',
+          'checkInAt',
+          'checkOutAt',
+          'createdAt',
+          'updatedAt'
+        ])
+        && request.resource.data.handlerUid == request.auth.uid
+        && request.resource.data.handlerName is string
+        && request.resource.data.status == 'Checked In'
+        && request.resource.data.checkInAt == request.time
+        && request.resource.data.checkOutAt == null
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+
+      // A handler can check out only from an active record.
+      allow update: if isHandler()
+        && resource.data.handlerUid == request.auth.uid
+        && resource.data.status == 'Checked In'
+        && resource.data.checkOutAt == null
+        && request.resource.data.diff(resource.data)
+          .affectedKeys()
+          .hasOnly([
+            'status',
+            'checkOutAt',
+            'updatedAt'
+          ])
+        && request.resource.data.diff(resource.data)
+          .affectedKeys()
+          .hasAll([
+            'status',
+            'checkOutAt',
+            'updatedAt'
+          ])
+        && request.resource.data.status == 'Checked Out'
+        && request.resource.data.checkOutAt == request.time
+        && request.resource.data.updatedAt == request.time;
+
+      // Attendance records cannot be deleted.
+      allow delete: if false;
+    }
+  }
+}

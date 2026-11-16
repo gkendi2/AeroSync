@@ -350,7 +350,7 @@ export default function FlightsScreen({
       const scenarios = [
         {
           id: 'on-track',
-          flightNumber: 'DEMO101',
+          flightNumber: 'KQ901',
           origin: 'Nairobi',
           destination: 'Mombasa',
           minutesUntilDeparture: 240,
@@ -358,7 +358,7 @@ export default function FlightsScreen({
         },
         {
           id: 'under-pressure',
-          flightNumber: 'DEMO202',
+          flightNumber: 'KQ902',
           origin: 'Nairobi',
           destination: 'Kisumu',
           minutesUntilDeparture: 100,
@@ -366,7 +366,7 @@ export default function FlightsScreen({
         },
         {
           id: 'close-to-departure',
-          flightNumber: 'DEMO303',
+          flightNumber: 'KQ903',
           origin: 'Nairobi',
           destination: 'Eldoret',
           minutesUntilDeparture: 25,
