@@ -94,6 +94,9 @@ type Incident = {
   reportedAt: Date | null;
 };
 
+/** Which flights the list shows; 'At risk' = High and Medium (the default). */
+type RiskFilter = 'At risk' | RiskLevel | 'Not scored';
+
 type FlightAssessment = {
   flight: Flight;
   live: FlightLiveInputs;
@@ -224,6 +227,7 @@ export default function DelayRiskScreen({
 
   const [error, setError] = useState('');
   const [selectedFlightId, setSelectedFlightId] = useState('');
+  const [riskFilter, setRiskFilter] = useState<RiskFilter>('At risk');
   const [selectedPeriod, setSelectedPeriod] = useState<'Today' | 'All flights'>('Today');
   const [showPeriodOptions, setShowPeriodOptions] = useState(false);
   const [expandedFactor, setExpandedFactor] = useState('');
@@ -463,12 +467,38 @@ export default function DelayRiskScreen({
       ? Math.round((highCount / scoredFlights) * 100)
       : 0;
 
-  const flightsAtRisk = visibleAssessments
-    .filter((item) => item.risk === 'High' || item.risk === 'Medium')
+  // The flight list below the legend, filtered by the selected legend item.
+  const listedFlights = visibleAssessments
+    .filter((item) =>
+      riskFilter === 'At risk'
+        ? item.risk === 'High' || item.risk === 'Medium'
+        : riskFilter === 'Not scored'
+          ? item.risk === null
+          : item.risk === riskFilter,
+    )
     .sort((a, b) => {
       if (a.risk === b.risk) return 0;
       return a.risk === 'High' ? -1 : 1;
     });
+
+  const listTitle =
+    riskFilter === 'At risk'
+      ? 'Flights at Risk'
+      : riskFilter === 'Not scored'
+        ? 'Not scored'
+        : `${riskFilter} risk`;
+
+  const emptyListText =
+    riskFilter === 'At risk'
+      ? 'No high- or medium-risk flights found for this period.'
+      : riskFilter === 'Not scored'
+        ? 'Every flight in this period has been scored.'
+        : `No ${riskFilter.toLowerCase()}-risk flights found for this period.`;
+
+  // Tapping the selected legend item again returns to Flights at Risk.
+  function toggleRiskFilter(filter: Exclude<RiskFilter, 'At risk'>) {
+    setRiskFilter((current) => (current === filter ? 'At risk' : filter));
+  }
 
   const selectedAssessment = assessments.find(
     (item) => item.flight.id === selectedFlightId,
@@ -779,45 +809,70 @@ export default function DelayRiskScreen({
                   </View>
 
                   <View style={styles.legend}>
-                    <View style={styles.legendRow}>
-                      <View style={[styles.legendDot, { backgroundColor: RED }]} />
-                      <Text style={styles.legendText}>High ({highCount})</Text>
-                    </View>
+                    {(
+                      [
+                        { filter: 'High', count: highCount, dot: { backgroundColor: RED } },
+                        { filter: 'Medium', count: mediumCount, dot: { backgroundColor: ORANGE } },
+                        { filter: 'Low', count: lowCount, dot: { backgroundColor: '#B8BBC0' } },
+                        {
+                          filter: 'Not scored',
+                          count: notScoredAssessments.length,
+                          dot: styles.legendDotHollow,
+                        },
+                      ] as const
+                    ).map(({ filter, count, dot }) => {
+                      const active = riskFilter === filter;
 
-                    <View style={styles.legendRow}>
-                      <View style={[styles.legendDot, { backgroundColor: ORANGE }]} />
-                      <Text style={styles.legendText}>Medium ({mediumCount})</Text>
-                    </View>
-
-                    <View style={styles.legendRow}>
-                      <View style={[styles.legendDot, { backgroundColor: '#B8BBC0' }]} />
-                      <Text style={styles.legendText}>Low ({lowCount})</Text>
-                    </View>
-
-                    <View style={styles.legendRow}>
-                      <View style={[styles.legendDot, styles.legendDotHollow]} />
-                      <Text style={styles.legendText}>
-                        Not scored ({notScoredAssessments.length})
-                      </Text>
-                    </View>
+                      return (
+                        <Pressable
+                          key={filter}
+                          onPress={() => toggleRiskFilter(filter)}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: active }}
+                          accessibilityLabel={`Show ${filter.toLowerCase()} flights`}
+                          style={({ pressed }) => [
+                            styles.legendRow,
+                            active && styles.legendRowActive,
+                            pressed && styles.pressed,
+                          ]}
+                        >
+                          <View style={[styles.legendDot, dot]} />
+                          <Text
+                            style={[
+                              styles.legendText,
+                              active && styles.legendTextActive,
+                            ]}
+                          >
+                            {filter} ({count})
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
                   </View>
                 </View>
 
                 <View style={styles.section}>
-                  <View style={styles.sectionHeadingRow}>
+                  <View style={[styles.sectionHeadingRow, styles.listHeadingRow]}>
                     <Text style={styles.sectionTitle}>
-                      Flights at Risk ({flightsAtRisk.length})
+                      {listTitle} ({listedFlights.length})
                     </Text>
+
+                    {riskFilter !== 'At risk' && (
+                      <Pressable
+                        onPress={() => setRiskFilter('At risk')}
+                        hitSlop={8}
+                      >
+                        <Text style={styles.showAtRisk}>Show at risk</Text>
+                      </Pressable>
+                    )}
                   </View>
 
-                  {flightsAtRisk.length === 0 ? (
+                  {listedFlights.length === 0 ? (
                     <View style={styles.emptyRow}>
-                      <Text style={styles.emptyText}>
-                        No high- or medium-risk flights found for this period.
-                      </Text>
+                      <Text style={styles.emptyText}>{emptyListText}</Text>
                     </View>
                   ) : (
-                    flightsAtRisk.map((item) => (
+                    listedFlights.map((item) => (
                       <Pressable
                         key={item.flight.id}
                         onPress={() => openFlight(item)}
@@ -849,7 +904,11 @@ export default function DelayRiskScreen({
                             styles.flightRiskBadge,
                             item.risk === 'High'
                               ? styles.highBadge
-                              : styles.mediumBadge,
+                              : item.risk === 'Medium'
+                                ? styles.mediumBadge
+                                : item.risk === 'Low'
+                                  ? styles.lowBadge
+                                  : styles.notScoredBadge,
                           ]}
                         >
                           <Text
@@ -858,7 +917,7 @@ export default function DelayRiskScreen({
                               { color: riskColor(item.risk) },
                             ]}
                           >
-                            {item.risk}
+                            {item.risk ?? 'Not scored'}
                           </Text>
                         </View>
 
@@ -867,47 +926,6 @@ export default function DelayRiskScreen({
                     ))
                   )}
                 </View>
-
-                {notScoredAssessments.length > 0 && (
-                  <View style={styles.section}>
-                    <View style={styles.sectionHeadingRow}>
-                      <Text style={styles.sectionTitle}>
-                        Not Scored ({notScoredAssessments.length})
-                      </Text>
-                    </View>
-
-                    {notScoredAssessments.map((item) => (
-                      <Pressable
-                        key={item.flight.id}
-                        onPress={() => openFlight(item)}
-                        style={({ pressed }) => [
-                          styles.flightRow,
-                          pressed && styles.pressed,
-                        ]}
-                      >
-                        <Text style={styles.airlineIcon}>✈</Text>
-
-                        <View style={styles.flightCopy}>
-                          <Text style={styles.flightNumber}>
-                            {item.flight.flightNumber}
-                          </Text>
-                          <Text style={styles.flightRoute}>
-                            {formatRoute(item.flight)}
-                          </Text>
-                          <Text style={styles.flightMeta}>
-                            {rowSummary(item)}
-                          </Text>
-                        </View>
-
-                        <Text style={styles.flightTime}>
-                          {item.flight.departureTime || '—'}
-                        </Text>
-
-                        <Text style={styles.rowChevron}>›</Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                )}
 
                 <View style={styles.section}>
                   <Text style={styles.sectionTitle}>Risk Factors</Text>
@@ -1143,10 +1161,41 @@ const styles = StyleSheet.create({
     marginLeft: 12,
   },
 
+  legendRowActive: {
+    backgroundColor: '#F1F2F4',
+  },
+
+  legendTextActive: {
+    fontWeight: '800',
+  },
+
+  listHeadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+
+  showAtRisk: {
+    color: RED,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+
+  lowBadge: {
+    backgroundColor: '#E7F4E9',
+  },
+
+  notScoredBadge: {
+    backgroundColor: '#ECEDEF',
+  },
+
   legendRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 14,
   },
 
   legendDot: {

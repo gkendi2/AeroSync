@@ -1,6 +1,8 @@
 import DateTimeField from '@/components/date-time-field';
 import {
   formatShiftTime,
+  parseDateString,
+  parseTimeString,
   splitShiftTime,
   toDateString,
 } from '@/features/datetime/format';
@@ -64,7 +66,29 @@ type CrewAssignment = {
   supervisorUid?: string;
 };
 
-type Filter = 'All' | 'On Duty' | 'Off Duty';
+// "Assigned" = has an active (not Cancelled/Completed) assignment.
+type Filter = 'All' | 'Assigned' | 'Unassigned';
+
+type UpcomingFlight = {
+  id: string;
+  flightNumber: string;
+  origin: string;
+  destination: string;
+  departureDate: string;
+  departureTime: string;
+  status: string;
+};
+
+// Same test as the flights screen's Completed tab.
+function isCompletedFlight(status: string) {
+  const value = status.toLowerCase();
+  return (
+    value.includes('complete') ||
+    value.includes('departed') ||
+    value.includes('arrived') ||
+    value.includes('landed')
+  );
+}
 
 const RED = '#C8102E';
 const DARK = '#292929';
@@ -101,6 +125,8 @@ export default function CrewScreen({ onBack }: { onBack?: () => void }) {
   const [activity, setActivity] = useState(ACTIVITIES[0]);
   const [editingAssignment, setEditingAssignment] =
     useState<CrewAssignment | null>(null);
+  const [flightsData, setFlightsData] = useState<UpcomingFlight[]>([]);
+  const [showFlightPicker, setShowFlightPicker] = useState(false);
 
   useEffect(() => {
     if (!currentUser) {
@@ -212,10 +238,35 @@ export default function CrewScreen({ onBack }: { onBack?: () => void }) {
       }
     );
 
+    const unsubscribeFlights = onSnapshot(
+      collection(db, 'Flights'),
+      (snapshot) => {
+        setFlightsData(
+          snapshot.docs.map((item) => {
+            const data = item.data();
+            return {
+              id: item.id,
+              flightNumber: data.flightNumber ?? '',
+              origin: data.origin ?? '',
+              destination: data.destination ?? '',
+              departureDate: data.departureDate ?? '',
+              departureTime: data.departureTime ?? '',
+              status: data.status ?? 'Scheduled',
+            };
+          })
+        );
+      },
+      (err) => {
+        console.error('Flight loading error:', err);
+        setError('Unable to load flights for the flight selector.');
+      }
+    );
+
     return () => {
       unsubscribeHandlers();
       unsubscribeSupervisors?.();
       unsubscribeAssignments();
+      unsubscribeFlights();
     };
   }, [currentUser?.uid, isAdmin]);
 
@@ -236,10 +287,10 @@ export default function CrewScreen({ onBack }: { onBack?: () => void }) {
   const counts = useMemo(
     () => ({
       All: handlers.length,
-      'On Duty': handlers.filter((handler) =>
+      Assigned: handlers.filter((handler) =>
         onDutyUids.has(handler.uid)
       ).length,
-      'Off Duty': handlers.filter(
+      Unassigned: handlers.filter(
         (handler) => !onDutyUids.has(handler.uid)
       ).length,
     }),
@@ -254,8 +305,8 @@ export default function CrewScreen({ onBack }: { onBack?: () => void }) {
 
       const matchesFilter =
         activeFilter === 'All' ||
-        (activeFilter === 'On Duty' && onDuty) ||
-        (activeFilter === 'Off Duty' && !onDuty);
+        (activeFilter === 'Assigned' && onDuty) ||
+        (activeFilter === 'Unassigned' && !onDuty);
 
       const name = handler.displayName || handler.email || '';
 
@@ -285,7 +336,44 @@ export default function CrewScreen({ onBack }: { onBack?: () => void }) {
     });
   }, [handlers, handlerSearch]);
 
+  // Flights that have not departed yet and are not cancelled or completed,
+  // soonest first. Computed when the picker opens, so "now" is current.
+  function upcomingFlights() {
+    const now = Date.now();
+
+    return flightsData
+      .filter((flight) => {
+        if (!flight.flightNumber.trim()) return false;
+        if (flight.status.toLowerCase().includes('cancel')) return false;
+        if (isCompletedFlight(flight.status)) return false;
+
+        const day = parseDateString(flight.departureDate);
+        if (!day) return false;
+
+        const time = parseTimeString(flight.departureTime);
+        if (!time) {
+          // No readable time: keep it while its date is today or later.
+          return flight.departureDate >= toDateString(new Date());
+        }
+
+        day.setHours(time.getHours(), time.getMinutes(), 0, 0);
+        return day.getTime() >= now;
+      })
+      .sort((a, b) =>
+        `${a.departureDate} ${a.departureTime}`.localeCompare(
+          `${b.departureDate} ${b.departureTime}`
+        )
+      );
+  }
+
+  function selectFlight(flight: UpcomingFlight) {
+    setFlightNumber(flight.flightNumber);
+    setShiftDate(flight.departureDate);
+    setShowFlightPicker(false);
+  }
+
   function resetForm() {
+    setShowFlightPicker(false);
     setSelectedHandler(null);
     setHandlerSearch('');
     setShowHandlerPicker(false);
@@ -370,7 +458,7 @@ export default function CrewScreen({ onBack }: { onBack?: () => void }) {
     if (!flightNumber.trim() || !shiftDate.trim() || !shiftTime.trim()) {
       Alert.alert(
         'Missing details',
-        'Enter the flight number, shift date and shift time.'
+        'Select a flight and enter the shift date and shift time.'
       );
       return;
     }
@@ -756,15 +844,81 @@ export default function CrewScreen({ onBack }: { onBack?: () => void }) {
 
               <View style={styles.fieldDivider} />
 
-              <Text style={styles.fieldLabel}>FLIGHT NUMBER</Text>
-              <TextInput
-                value={flightNumber}
-                onChangeText={setFlightNumber}
-                placeholder="e.g. KQ100"
-                placeholderTextColor="#9299A0"
-                autoCapitalize="characters"
-                style={styles.input}
-              />
+              <Text style={styles.fieldLabel}>FLIGHT</Text>
+              <Pressable
+                onPress={() => setShowFlightPicker((open) => !open)}
+                style={[styles.handlerOption, styles.flightSelector]}
+                accessibilityRole="button"
+                accessibilityLabel="Select a flight"
+              >
+                <View style={styles.handlerInfo}>
+                  <Text style={styles.handlerName}>
+                    {flightNumber || 'Select an upcoming flight'}
+                  </Text>
+                  <Text style={styles.helperText}>
+                    {(() => {
+                      if (!flightNumber) {
+                        return 'Sets the shift date to the departure date';
+                      }
+                      const match = flightsData.find(
+                        (flight) =>
+                          flight.flightNumber === flightNumber &&
+                          flight.departureDate === shiftDate
+                      );
+                      return match
+                        ? `${match.origin} → ${match.destination} · ${match.departureDate} ${match.departureTime}`
+                        : 'Current flight on this assignment';
+                    })()}
+                  </Text>
+                </View>
+
+                <Text style={styles.check}>
+                  {showFlightPicker ? '⌃' : '⌄'}
+                </Text>
+              </Pressable>
+
+              {showFlightPicker && (
+                <View style={styles.flightPickerList}>
+                  {upcomingFlights().length === 0 ? (
+                    <Text style={styles.helperText}>
+                      No upcoming flights. Create one on the Flights screen
+                      first.
+                    </Text>
+                  ) : (
+                    upcomingFlights().map((flight) => {
+                      const selected =
+                        flight.flightNumber === flightNumber &&
+                        flight.departureDate === shiftDate;
+
+                      return (
+                        <Pressable
+                          key={flight.id}
+                          onPress={() => selectFlight(flight)}
+                          style={[
+                            styles.handlerOption,
+                            selected && styles.selectedOption,
+                          ]}
+                        >
+                          <View style={styles.handlerInfo}>
+                            <Text style={styles.handlerName}>
+                              {flight.flightNumber}
+                            </Text>
+                            <Text style={styles.helperText}>
+                              {flight.origin} → {flight.destination} ·{' '}
+                              {flight.departureDate}{' '}
+                              {flight.departureTime || '—'}
+                            </Text>
+                          </View>
+
+                          <Text style={styles.check}>
+                            {selected ? '✓' : '○'}
+                          </Text>
+                        </Pressable>
+                      );
+                    })
+                  )}
+                </View>
+              )}
 
               <Text style={styles.fieldLabel}>SHIFT DATE</Text>
               <DateTimeField
@@ -963,7 +1117,7 @@ export default function CrewScreen({ onBack }: { onBack?: () => void }) {
               style={styles.filterScroll}
               contentContainerStyle={styles.filterContent}
             >
-              {(['All', 'On Duty', 'Off Duty'] as Filter[]).map((filter) => (
+              {(['All', 'Assigned', 'Unassigned'] as Filter[]).map((filter) => (
                 <Pressable
                   key={filter}
                   onPress={() => setActiveFilter(filter)}
@@ -1066,7 +1220,7 @@ export default function CrewScreen({ onBack }: { onBack?: () => void }) {
                         />
 
                         <Text style={styles.dutyText}>
-                          {onDuty ? 'On Duty' : 'Off Duty'}
+                          {onDuty ? 'Assigned' : 'Unassigned'}
                         </Text>
                       </View>
 
@@ -1443,6 +1597,14 @@ const styles = StyleSheet.create({
     borderColor: BORDER,
     borderRadius: 9,
     padding: 9,
+    marginBottom: 8,
+  },
+
+  flightSelector: {
+    marginBottom: 8,
+  },
+
+  flightPickerList: {
     marginBottom: 8,
   },
 

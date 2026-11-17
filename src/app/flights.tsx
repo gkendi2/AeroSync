@@ -8,6 +8,7 @@ import {
   onSnapshot,
   serverTimestamp,
   setDoc,
+  updateDoc,
 } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -38,6 +39,17 @@ type Flight = {
 };
 
 type FlightTab = 'Today' | 'Upcoming' | 'Completed';
+
+// Status choices when editing a flight. A flight whose stored status is not
+// in this list keeps it as an extra choice.
+const FLIGHT_STATUSES = [
+  'Scheduled',
+  'Boarding',
+  'Delayed',
+  'Departed',
+  'Arrived',
+  'Cancelled',
+];
 
 const RED = '#C8102E';
 const DARK = '#20252B';
@@ -131,6 +143,15 @@ export default function FlightsScreen({
   const [selectedStatus, setSelectedStatus] = useState('All');
   const [selectedDate, setSelectedDate] = useState(dateString(new Date()));
   const [showForm, setShowForm] = useState(false);
+
+  // Edit form: the flight being edited (null when closed) and its draft values.
+  const [editingFlight, setEditingFlight] = useState<Flight | null>(null);
+  const [editDepartureDate, setEditDepartureDate] = useState('');
+  const [editDepartureTime, setEditDepartureTime] = useState('');
+  const [editArrivalDate, setEditArrivalDate] = useState('');
+  const [editArrivalTime, setEditArrivalTime] = useState('');
+  const [editStatus, setEditStatus] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const [flightNumber, setFlightNumber] = useState('');
   const [origin, setOrigin] = useState('');
@@ -425,6 +446,83 @@ export default function FlightsScreen({
     }
   }
 
+  function startEditingFlight(flight: Flight) {
+    setShowForm(false);
+    setEditingFlight(flight);
+    setEditDepartureDate(flight.departureDate);
+    setEditDepartureTime(flight.departureTime);
+    setEditArrivalDate(flight.arrivalDate);
+    setEditArrivalTime(flight.arrivalTime);
+    setEditStatus(flight.status || 'Scheduled');
+  }
+
+  async function saveFlightEdit() {
+    if (!editingFlight) return;
+
+    if (!auth.currentUser) {
+      showMessage('Sign-in required', 'Please sign in again.');
+      return;
+    }
+
+    // Same checks as creating a flight.
+    if (!editDepartureDate.trim() || !editDepartureTime.trim()) {
+      showMessage(
+        'Missing information',
+        'Enter the departure date and departure time.'
+      );
+      return;
+    }
+
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(editDepartureDate) ||
+      !/^\d{2}:\d{2}$/.test(editDepartureTime)
+    ) {
+      showMessage(
+        'Invalid departure details',
+        'Use YYYY-MM-DD for the date and HH:MM for the time.'
+      );
+      return;
+    }
+
+    if (
+      (editArrivalDate && !/^\d{4}-\d{2}-\d{2}$/.test(editArrivalDate)) ||
+      (editArrivalTime && !/^\d{2}:\d{2}$/.test(editArrivalTime))
+    ) {
+      showMessage(
+        'Invalid arrival details',
+        'Use YYYY-MM-DD for the date and HH:MM for the time.'
+      );
+      return;
+    }
+
+    setSavingEdit(true);
+
+    try {
+      await updateDoc(doc(db, 'Flights', editingFlight.id), {
+        departureDate: editDepartureDate,
+        departureTime: editDepartureTime,
+        arrivalDate: editArrivalDate || '',
+        arrivalTime: editArrivalTime || '',
+        status: editStatus,
+        updatedAt: serverTimestamp(),
+      });
+
+      showMessage(
+        'Flight updated',
+        `${editingFlight.flightNumber} has been updated.`
+      );
+      setEditingFlight(null);
+    } catch (error) {
+      console.error('Flight update failed:', error);
+      showMessage(
+        'Could not update flight',
+        'The changes were not saved. Check your Firestore permissions and try again.'
+      );
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
   function changeTab(tab: FlightTab) {
     setActiveTab(tab);
     setSelectedStatus('All');
@@ -466,7 +564,10 @@ export default function FlightsScreen({
             </Pressable>
 
             <Pressable
-              onPress={() => setShowForm(!showForm)}
+              onPress={() => {
+                setEditingFlight(null);
+                setShowForm(!showForm);
+              }}
               style={styles.addButton}
               accessibilityLabel="Create a flight"
             >
@@ -670,6 +771,96 @@ export default function FlightsScreen({
             </View>
           )}
 
+          {editingFlight && (
+            <View style={styles.formCard}>
+              <View style={styles.formHeader}>
+                <Text style={styles.formTitle}>
+                  Edit {editingFlight.flightNumber}
+                </Text>
+                <Pressable onPress={() => setEditingFlight(null)}>
+                  <Text style={styles.closeForm}>×</Text>
+                </Pressable>
+              </View>
+
+              <Text style={styles.editRoute}>
+                {editingFlight.origin} → {editingFlight.destination}
+              </Text>
+
+              <Text style={styles.formLabel}>DEPARTURE DATE</Text>
+              <DateTimeField
+                mode="date"
+                style={styles.formInput}
+                value={editDepartureDate}
+                onChange={setEditDepartureDate}
+              />
+
+              <Text style={styles.formLabel}>DEPARTURE TIME (24-HOUR)</Text>
+              <DateTimeField
+                mode="time"
+                style={styles.formInput}
+                value={editDepartureTime}
+                onChange={setEditDepartureTime}
+              />
+
+              <Text style={styles.formLabel}>ARRIVAL DATE (OPTIONAL)</Text>
+              <DateTimeField
+                mode="date"
+                style={styles.formInput}
+                value={editArrivalDate}
+                onChange={setEditArrivalDate}
+                clearable
+              />
+
+              <Text style={styles.formLabel}>ARRIVAL TIME (OPTIONAL)</Text>
+              <DateTimeField
+                mode="time"
+                style={styles.formInput}
+                value={editArrivalTime}
+                onChange={setEditArrivalTime}
+                clearable
+              />
+
+              <Text style={styles.formLabel}>STATUS</Text>
+              <View style={styles.statusOptions}>
+                {(FLIGHT_STATUSES.includes(editingFlight.status) ||
+                !editingFlight.status
+                  ? FLIGHT_STATUSES
+                  : [...FLIGHT_STATUSES, editingFlight.status]
+                ).map((status) => (
+                  <Pressable
+                    key={status}
+                    onPress={() => setEditStatus(status)}
+                    style={[
+                      styles.filterChip,
+                      editStatus === status && styles.filterChipActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.filterChipText,
+                        editStatus === status && styles.filterChipTextActive,
+                      ]}
+                    >
+                      {status}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              <Pressable
+                onPress={saveFlightEdit}
+                disabled={savingEdit}
+                style={styles.saveButton}
+              >
+                {savingEdit ? (
+                  <ActivityIndicator color={WHITE} />
+                ) : (
+                  <Text style={styles.saveButtonText}>Save changes</Text>
+                )}
+              </Pressable>
+            </View>
+          )}
+
           <View style={styles.resultsHeading}>
             <Text style={styles.resultsCount}>
               {activeTab === 'Today'
@@ -715,12 +906,16 @@ export default function FlightsScreen({
                 const appearance = getStatusAppearance(flight.status);
 
                 return (
-                  <View
+                  <Pressable
                     key={flight.id}
-                    style={[
+                    onPress={() => startEditingFlight(flight)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Edit flight ${flight.flightNumber}`}
+                    style={({ pressed }) => [
                       styles.flightRow,
                       index === filteredFlights.length - 1 &&
                         styles.lastFlightRow,
+                      pressed && styles.flightRowPressed,
                     ]}
                   >
                     <View style={styles.flightIdentity}>
@@ -756,7 +951,7 @@ export default function FlightsScreen({
                     </View>
 
                     <Text style={styles.rowChevron}>›</Text>
-                  </View>
+                  </Pressable>
                 );
               })}
             </View>
@@ -1109,6 +1304,20 @@ const styles = StyleSheet.create({
   },
 
   /* Create flight */
+  flightRowPressed: {
+    opacity: 0.6,
+  },
+  editRoute: {
+    color: MUTED,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  statusOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 12,
+  },
   formCard: {
     backgroundColor: WHITE,
     borderWidth: 1,
