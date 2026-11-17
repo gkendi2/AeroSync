@@ -11,7 +11,14 @@ import {
   useCameraPermissions,
 } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
-import { doc, getDoc } from 'firebase/firestore';
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  where,
+} from 'firebase/firestore';
 import { useState } from 'react';
 import {
   ActivityIndicator,
@@ -23,6 +30,16 @@ import {
   Text,
   View,
 } from 'react-native';
+import AeroSyncLogo from '@/components/aerosync-logo';
+import Icon from '@/components/icon';
+import { AeroSyncColors } from '@/constants/theme';
+import { toDateString } from '@/features/datetime/format';
+import {
+  assignedFlightsOn,
+  type HandlerTask,
+  wrongFlightWarning,
+} from '@/features/handler/tasks';
+import { confirmAction } from '@/lib/confirm';
 
 type BaggageRecord = {
   id: string;
@@ -36,15 +53,15 @@ type BaggageRecord = {
 
 type HandlingAction = 'Loading' | 'Offloading';
 
-const RED = '#C8102E';
-const DARK_RED = '#A20D25';
-const CHARCOAL = '#252525';
-const BG = '#F4F3F3';
-const WHITE = '#FFFFFF';
-const MUTED = '#777777';
-const BORDER = '#E7E7E9';
-const GREEN = '#16805C';
-const PALE_RED = '#FCEBED';
+const RED = AeroSyncColors.primaryDark;
+const CHARCOAL = AeroSyncColors.text;
+const BG = AeroSyncColors.background;
+const WHITE = AeroSyncColors.white;
+const MUTED = AeroSyncColors.textSecondary;
+const BORDER = AeroSyncColors.border;
+const GREEN = AeroSyncColors.success;
+const PALE_RED = AeroSyncColors.primaryLight;
+const PALE_GREEN = AeroSyncColors.successLight;
 
 const QR_PREFIX = 'AEROSYNC:BAGGAGE:';
 
@@ -58,11 +75,14 @@ export default function ScanQRScreen() {
 
   const [message, setMessage] = useState('');
   const [baggage, setBaggage] = useState<BaggageRecord | null>(null);
+  // Set after a handling event is saved, so "Scan next bag" can be offered.
+  const [recorded, setRecorded] = useState<string | null>(null);
 
   async function lookUpBaggageFromQR(data: string) {
     setLookingUp(true);
     setMessage('');
     setBaggage(null);
+    setRecorded(null);
 
     try {
       if (!data.startsWith(QR_PREFIX)) {
@@ -185,23 +205,33 @@ export default function ScanQRScreen() {
       return;
     }
 
+    const handlerUid = auth.currentUser.uid;
     setSaving(true);
 
     try {
+      const warning = await checkBagFlight(handlerUid, baggage.flightId ?? '');
+
+      if (warning) {
+        const recordAnyway = await confirmAction({
+          title: 'Different flight',
+          message: warning,
+          confirmLabel: 'Record anyway',
+        });
+
+        if (!recordAnyway) return;
+      }
+
       const newStatus = await recordHandlingEvent(
         baggage.id,
         action,
-        auth.currentUser.uid
+        handlerUid
       );
 
       setBaggage((previous) =>
         previous ? { ...previous, status: newStatus } : null
       );
 
-      Alert.alert(
-        'Handling event recorded',
-        `${action} was saved for ${baggage.baggageId || baggage.id}.`
-      );
+      setRecorded(`${action} recorded for ${baggage.baggageId || baggage.id}.`);
     } catch (error) {
       console.error('Could not save handling event:', error);
 
@@ -221,7 +251,44 @@ export default function ScanQRScreen() {
   function scanAgain() {
     setBaggage(null);
     setMessage('');
+    setRecorded(null);
     setScanning(true);
+  }
+
+  /**
+   * Read-only check: is the bag for one of today's assigned flights?
+   * Returns the warning text, or null. If the check itself fails the
+   * handler is not blocked.
+   */
+  async function checkBagFlight(handlerUid: string, bagFlight: string) {
+    try {
+      const snapshot = await getDocs(
+        query(
+          collection(db, 'CrewAssignments'),
+          where('handlerUid', '==', handlerUid)
+        )
+      );
+
+      const tasks: HandlerTask[] = snapshot.docs.map((item) => {
+        const data = item.data();
+        return {
+          id: item.id,
+          flightNumber: data.flightNumber ?? '',
+          shiftDate: data.shiftDate ?? '',
+          shiftTime: data.shiftTime ?? '',
+          activity: data.activity ?? '',
+          status: data.status ?? 'Assigned',
+        };
+      });
+
+      return wrongFlightWarning(
+        bagFlight,
+        assignedFlightsOn(tasks, toDateString(new Date()))
+      );
+    } catch (error) {
+      console.error('Could not check assigned flights:', error);
+      return null;
+    }
   }
 
   if (!permission) {
@@ -241,9 +308,7 @@ export default function ScanQRScreen() {
     return (
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.center}>
-          <View style={styles.brandMark}>
-            <Text style={styles.brandMarkText}>A</Text>
-          </View>
+          <AeroSyncLogo size={35} />
 
           <Text style={styles.eyebrow}>AEROSYNC SCANNER</Text>
           <Text style={styles.heading}>Camera permission required</Text>
@@ -274,9 +339,7 @@ export default function ScanQRScreen() {
         {/* Header */}
         <View style={styles.headingSection}>
           <View style={styles.headingTopRow}>
-            <View style={styles.brandMark}>
-              <Text style={styles.brandMarkText}>A</Text>
-            </View>
+            <AeroSyncLogo size={35} />
 
             <View>
               <Text style={styles.brandName}>AEROSYNC</Text>
@@ -295,9 +358,6 @@ export default function ScanQRScreen() {
               </Text>
             </View>
 
-            <View style={styles.qrHeadingIcon}>
-              <Text style={styles.qrHeadingIconText}>⌗</Text>
-            </View>
           </View>
         </View>
 
@@ -361,7 +421,7 @@ export default function ScanQRScreen() {
                       </>
                     ) : (
                       <>
-                        <Text style={styles.placeholderIcon}>⌗</Text>
+                        <Icon name="scanQr" size={48} color={WHITE} />
                         <Text style={styles.cameraMessage}>
                           Scanner paused
                         </Text>
@@ -376,7 +436,7 @@ export default function ScanQRScreen() {
 
               <View style={styles.cameraInstruction}>
                 <View style={styles.instructionIcon}>
-                  <Text style={styles.instructionIconText}>i</Text>
+                  <Icon name="info" size={16} color={RED} />
                 </View>
                 <Text style={styles.cameraHint}>
                   Hold the camera steady and ensure the entire QR
@@ -413,7 +473,7 @@ export default function ScanQRScreen() {
             <View style={styles.photoCard}>
               <View style={styles.photoHeader}>
                 <View style={styles.photoIcon}>
-                  <Text style={styles.photoIconText}>▧</Text>
+                  <Icon name="image" size={24} color={RED} />
                 </View>
 
                 <View style={styles.photoHeadingText}>
@@ -451,7 +511,7 @@ export default function ScanQRScreen() {
           <View style={styles.recordCard}>
             <View style={styles.successHeader}>
               <View style={styles.successIcon}>
-                <Text style={styles.successIconText}>✓</Text>
+                <Icon name="check" size={24} color={GREEN} />
               </View>
 
               <View style={styles.recordInfo}>
@@ -555,7 +615,7 @@ export default function ScanQRScreen() {
             {baggage.status === 'Offloaded' && (
               <View style={styles.completedBanner}>
                 <View style={styles.completedIcon}>
-                  <Text style={styles.completedIconText}>✓</Text>
+                  <Icon name="check" size={22} color={GREEN} />
                 </View>
                 <Text style={styles.completedTitle}>
                   Handling completed
@@ -577,17 +637,32 @@ export default function ScanQRScreen() {
                 </View>
               )}
 
+            {recorded && (
+              <View style={styles.recordedBanner}>
+                <Icon name="checkCircle" size={20} color={GREEN} />
+                <Text style={styles.recordedText}>{recorded}</Text>
+              </View>
+            )}
+
             <Pressable
               disabled={saving}
               onPress={scanAgain}
               style={({ pressed }) => [
-                styles.secondaryButton,
+                recorded ? styles.primaryButton : styles.secondaryButton,
+                styles.scanNextButton,
                 pressed && styles.pressed,
                 saving && styles.disabledButton,
               ]}
             >
-              <Text style={styles.secondaryButtonText}>
-                Scan another bag
+              <Icon name="scanQr" size={20} color={recorded ? WHITE : RED} />
+              <Text
+                style={
+                  recorded
+                    ? styles.primaryButtonText
+                    : styles.secondaryButtonText
+                }
+              >
+                Scan next bag
               </Text>
             </Pressable>
           </View>
@@ -602,6 +677,27 @@ export default function ScanQRScreen() {
 }
 
 const styles = StyleSheet.create({
+  recordedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: PALE_GREEN,
+    borderRadius: 11,
+    padding: 12,
+  },
+
+  recordedText: {
+    flex: 1,
+    color: GREEN,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+
+  scanNextButton: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+
   safeArea: {
     flex: 1,
     backgroundColor: BG,
@@ -643,21 +739,6 @@ const styles = StyleSheet.create({
     gap: 10,
   },
 
-  brandMark: {
-    width: 35,
-    height: 35,
-    borderRadius: 10,
-    backgroundColor: RED,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  brandMarkText: {
-    color: WHITE,
-    fontSize: 21,
-    fontWeight: '900',
-  },
-
   brandName: {
     color: CHARCOAL,
     fontSize: 12,
@@ -695,21 +776,6 @@ const styles = StyleSheet.create({
     color: MUTED,
     fontSize: 12,
     lineHeight: 19,
-  },
-
-  qrHeadingIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    backgroundColor: PALE_RED,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  qrHeadingIconText: {
-    color: RED,
-    fontSize: 31,
-    fontWeight: '700',
   },
 
   eyebrow: {
@@ -863,11 +929,6 @@ const styles = StyleSheet.create({
     backgroundColor: CHARCOAL,
   },
 
-  placeholderIcon: {
-    fontSize: 48,
-    color: WHITE,
-  },
-
   cameraMessage: {
     color: WHITE,
     fontSize: 14,
@@ -897,12 +958,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  instructionIconText: {
-    color: RED,
-    fontSize: 12,
-    fontWeight: '900',
-  },
-
   cameraHint: {
     flex: 1,
     color: MUTED,
@@ -919,7 +974,7 @@ const styles = StyleSheet.create({
   },
 
   errorText: {
-    color: DARK_RED,
+    color: RED,
     fontSize: 12,
     lineHeight: 19,
     textAlign: 'center',
@@ -1029,12 +1084,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  photoIconText: {
-    color: RED,
-    fontSize: 24,
-    fontWeight: '800',
-  },
-
   photoTitle: {
     color: CHARCOAL,
     fontSize: 15,
@@ -1066,15 +1115,9 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 13,
-    backgroundColor: '#E8F5EF',
+    backgroundColor: PALE_GREEN,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-
-  successIconText: {
-    color: GREEN,
-    fontSize: 23,
-    fontWeight: '900',
   },
 
   recordInfo: {
@@ -1094,7 +1137,7 @@ const styles = StyleSheet.create({
   },
 
   verifiedBadge: {
-    backgroundColor: '#E8F5EF',
+    backgroundColor: PALE_GREEN,
     paddingHorizontal: 8,
     paddingVertical: 6,
     borderRadius: 7,
@@ -1165,7 +1208,7 @@ const styles = StyleSheet.create({
   },
 
   completedBanner: {
-    backgroundColor: '#E8F5EF',
+    backgroundColor: PALE_GREEN,
     borderRadius: 13,
     padding: 16,
     alignItems: 'center',
@@ -1179,12 +1222,6 @@ const styles = StyleSheet.create({
     backgroundColor: WHITE,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-
-  completedIconText: {
-    color: GREEN,
-    fontSize: 21,
-    fontWeight: '900',
   },
 
   completedTitle: {

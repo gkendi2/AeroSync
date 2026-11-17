@@ -2,10 +2,8 @@
 import { auth, db } from '@/lib/firebase';
 import {
   collection,
-  doc,
   onSnapshot,
   query,
-  updateDoc,
   where,
 } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
@@ -20,6 +18,29 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useRouter } from 'expo-router';
+
+import BagProgress from '@/components/bag-progress';
+import FlightStrip from '@/components/flight-strip';
+import Icon from '@/components/icon';
+import StatusBadge, { taskStatusTone } from '@/components/status-badge';
+import { AeroSyncColors } from '@/constants/theme';
+import { parseShiftStart } from '@/features/delay-risk/inputs';
+import {
+  flightRoute,
+  useAttendanceStatus,
+  useBaggage,
+  useFlights,
+} from '@/features/handler/hooks';
+import {
+  bagProgressForTask,
+  findFlightForTask,
+  type HandlerTask,
+  isOverdue,
+  startBlockedReason,
+} from '@/features/handler/tasks';
+import { advanceTask } from '@/features/handler/taskService';
+import { confirmAction } from '@/lib/confirm';
 
 type Assignment = {
   id: string;
@@ -32,13 +53,13 @@ type Assignment = {
 
 type FilterType = 'Today' | 'Upcoming' | 'In Progress' | 'Completed';
 
-const RED = '#C8102E';
-const CHARCOAL = '#252525';
-const BACKGROUND = '#F5F5F7';
-const WHITE = '#FFFFFF';
-const MUTED = '#777777';
-const BORDER = '#E9E9E9';
-const GREEN = '#16805C';
+const RED = AeroSyncColors.primaryDark;
+const CHARCOAL = AeroSyncColors.text;
+const BACKGROUND = AeroSyncColors.background;
+const WHITE = AeroSyncColors.white;
+const MUTED = AeroSyncColors.textSecondary;
+const BORDER = AeroSyncColors.border;
+const GREEN = AeroSyncColors.success;
 
 function getLocalDateKey(date: Date) {
   const year = date.getFullYear();
@@ -79,43 +100,15 @@ function parseAssignmentDate(dateValue?: string) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function getAssignmentDateTime(assignment: Assignment) {
-  const date = parseAssignmentDate(assignment.shiftDate);
-
-  if (!date || !assignment.shiftTime) return null;
-
-  const timeMatch = assignment.shiftTime.trim().match(
-    /^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i
-  );
-
-  if (!timeMatch) return null;
-
-  let hours = Number(timeMatch[1]);
-  const minutes = Number(timeMatch[2]);
-  const period = timeMatch[3]?.toUpperCase();
-
-  if (minutes > 59 || hours > 23) return null;
-
-  if (period) {
-    if (hours < 1 || hours > 12) return null;
-    if (period === 'AM' && hours === 12) hours = 0;
-    if (period === 'PM' && hours !== 12) hours += 12;
-  }
-
-  date.setHours(hours, minutes, 0, 0);
-  return date;
-}
-
-function isOverdue(assignment: Assignment, now: Date) {
-  const status = assignment.status ?? 'Assigned';
-
-  if (status === 'Completed' || status === 'Cancelled') {
-    return false;
-  }
-
-  const scheduled = getAssignmentDateTime(assignment);
-
-  return scheduled ? scheduled.getTime() < now.getTime() : false;
+function toTask(assignment: Assignment): HandlerTask {
+  return {
+    id: assignment.id,
+    flightNumber: assignment.flightNumber ?? '',
+    shiftDate: assignment.shiftDate ?? '',
+    shiftTime: assignment.shiftTime ?? '',
+    activity: assignment.activity ?? '',
+    status: assignment.status ?? 'Assigned',
+  };
 }
 
 function formatTaskDate(dateValue?: string) {
@@ -129,21 +122,8 @@ function formatTaskDate(dateValue?: string) {
   });
 }
 
-function getStatusColor(status: string, overdue: boolean) {
-  if (overdue) return '#B42318';
-  if (status === 'Completed') return GREEN;
-  if (status === 'In Progress') return '#946200';
-  return MUTED;
-}
-
-function getStatusBackground(status: string, overdue: boolean) {
-  if (overdue) return '#FCEBED';
-  if (status === 'Completed') return '#E8F5EF';
-  if (status === 'In Progress') return '#FFF3D6';
-  return '#F0F0F0';
-}
-
 export default function MyTasksScreen() {
+  const router = useRouter();
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
@@ -154,6 +134,13 @@ export default function MyTasksScreen() {
   const [searchText, setSearchText] = useState('');
 
   const today = getLocalDateKey(currentTime);
+
+  const flights = useFlights();
+  const bags = useBaggage(assignments.length > 0);
+  const attendance = useAttendanceStatus(auth.currentUser?.uid, today);
+  const startBlocked = attendance.loading
+    ? 'Checking attendance...'
+    : startBlockedReason(attendance.status);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -194,11 +181,10 @@ export default function MyTasksScreen() {
           };
         });
 
-        tasks.sort((a, b) => {
-          const dateA = getAssignmentDateTime(a)?.getTime() ?? 0;
-          const dateB = getAssignmentDateTime(b)?.getTime() ?? 0;
-          return dateA - dateB;
-        });
+        // By shift start (the first time in shiftTime).
+        const startOf = (task: Assignment) =>
+          parseShiftStart(task.shiftDate ?? '', task.shiftTime ?? '')?.getTime() ?? 0;
+        tasks.sort((a, b) => startOf(a) - startOf(b));
 
         setAssignments(tasks);
         setLoadError('');
@@ -215,24 +201,24 @@ export default function MyTasksScreen() {
   }, []);
 
   async function updateTask(assignment: Assignment) {
-    const currentStatus = assignment.status ?? 'Assigned';
+    const task = toTask(assignment);
 
-    if (
-      currentStatus !== 'Assigned' &&
-      currentStatus !== 'In Progress'
-    ) {
-      return;
+    if (task.status !== 'Assigned' && task.status !== 'In Progress') return;
+    if (task.status === 'Assigned' && startBlocked) return;
+
+    if (task.status === 'In Progress') {
+      const confirmed = await confirmAction({
+        title: 'Mark completed?',
+        message: `Mark ${task.flightNumber || 'this task'} · ${task.activity || 'General handling'} as completed?`,
+        confirmLabel: 'Mark completed',
+      });
+      if (!confirmed) return;
     }
-
-    const nextStatus =
-      currentStatus === 'Assigned' ? 'In Progress' : 'Completed';
 
     setUpdatingId(assignment.id);
 
     try {
-      await updateDoc(doc(db, 'CrewAssignments', assignment.id), {
-        status: nextStatus,
-      });
+      await advanceTask(assignment.id, task.status);
     } catch (error) {
       console.error('Could not update task:', error);
 
@@ -364,7 +350,9 @@ export default function MyTasksScreen() {
 
         {/* Search */}
         <View style={styles.searchBox}>
-          <Text style={styles.searchIcon}>⌕</Text>
+          <View style={styles.searchIcon}>
+            <Icon name="search" size={20} color={CHARCOAL} />
+          </View>
 
           <TextInput
             value={searchText}
@@ -376,8 +364,12 @@ export default function MyTasksScreen() {
           />
 
           {searchText.length > 0 && (
-            <Pressable onPress={() => setSearchText('')}>
-              <Text style={styles.clearSearch}>✕</Text>
+            <Pressable
+              onPress={() => setSearchText('')}
+              style={styles.clearSearch}
+              accessibilityLabel="Clear search"
+            >
+              <Icon name="close" size={18} color={MUTED} />
             </Pressable>
           )}
         </View>
@@ -404,7 +396,7 @@ export default function MyTasksScreen() {
           </View>
         ) : filteredAssignments.length === 0 ? (
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyIcon}>✓</Text>
+            <Icon name="checkCircle" size={28} color={GREEN} />
 
             <Text style={styles.emptyTitle}>
               {searchText
@@ -427,111 +419,125 @@ export default function MyTasksScreen() {
         ) : (
           <View style={styles.assignmentList}>
             {filteredAssignments.map((assignment) => {
-              const status = assignment.status ?? 'Assigned';
+              const task = toTask(assignment);
+              const status = task.status;
               const isCompleted = status === 'Completed';
-              const isInProgress = status === 'In Progress';
+              const isAssigned = status === 'Assigned';
               const isUpdating = updatingId === assignment.id;
-              const overdue = isOverdue(assignment, currentTime);
-
-              const statusColor = getStatusColor(status, overdue);
-              const statusBackground = getStatusBackground(
-                status,
-                overdue
+              const overdue = isOverdue(task, currentTime);
+              const flight = findFlightForTask(task, flights);
+              const bagProgress = bagProgressForTask(
+                task,
+                flights,
+                bags,
+                currentTime
               );
+              const startDisabled = isAssigned && !!startBlocked;
 
               return (
                 <View key={assignment.id} style={styles.taskRow}>
-                  <View style={styles.taskMain}>
-                    <View style={styles.taskTopLine}>
-                      <Text
-                        style={styles.flightNumber}
-                        numberOfLines={1}
-                      >
-                        {assignment.flightNumber || 'General task'}
-                      </Text>
+                  <FlightStrip
+                    flightNumber={task.flightNumber}
+                    route={flightRoute(flight)}
+                    departure={
+                      flight?.departureTime
+                        ? `Dep ${flight.departureTime}`
+                        : undefined
+                    }
+                    right={
+                      <StatusBadge
+                        label={overdue ? 'Overdue' : status}
+                        tone={taskStatusTone(status, overdue)}
+                      />
+                    }
+                  />
 
+                  <View style={styles.taskBottomLine}>
+                    <Text style={styles.activity} numberOfLines={1}>
+                      {assignment.activity || 'General handling'}
+                    </Text>
+
+                    <View style={styles.shiftTime}>
+                      <Icon name="clock" size={14} color={MUTED} />
                       <Text style={styles.taskTime}>
                         {assignment.shiftTime || '—'}
                       </Text>
-
-                      <View
-                        style={[
-                          styles.statusBadge,
-                          { backgroundColor: statusBackground },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.statusText,
-                            { color: statusColor },
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {overdue ? 'Overdue' : status}
-                        </Text>
-                      </View>
                     </View>
 
-                    <View style={styles.taskBottomLine}>
-                      <Text
-                        style={styles.activity}
-                        numberOfLines={1}
-                      >
-                        {assignment.activity || 'General handling'}
-                      </Text>
-
-                      <Text style={styles.taskDate}>
-                        {formatTaskDate(assignment.shiftDate)}
-                      </Text>
-                    </View>
-
-                    {overdue && (
-                      <Text style={styles.overdueText}>
-                        Scheduled time has passed
-                      </Text>
-                    )}
-
-                    {!isCompleted && (
-                      <Pressable
-                        accessibilityRole="button"
-                        disabled={isUpdating}
-                        onPress={() => updateTask(assignment)}
-                        style={({ pressed }) => [
-                          styles.taskAction,
-                          isInProgress && styles.completeAction,
-                          pressed && styles.pressed,
-                          isUpdating && styles.disabledButton,
-                        ]}
-                      >
-                        {isUpdating ? (
-                          <ActivityIndicator
-                            size="small"
-                            color={RED}
-                          />
-                        ) : (
-                          <Text
-                            style={[
-                              styles.taskActionText,
-                              isInProgress &&
-                                styles.completeActionText,
-                            ]}
-                          >
-                            {status === 'Assigned'
-                              ? 'START TASK'
-                              : 'MARK AS COMPLETED'}
-                          </Text>
-                        )}
-                      </Pressable>
-                    )}
-
-                    {isCompleted && (
-                      <Text style={styles.completedText}>
-                        ✓ Task completed
-                      </Text>
-                    )}
+                    <Text style={styles.taskDate}>
+                      {formatTaskDate(assignment.shiftDate)}
+                    </Text>
                   </View>
 
-                  <Text style={styles.chevron}>›</Text>
+                  {overdue && (
+                    <Text style={styles.overdueText}>
+                      Shift end has passed
+                    </Text>
+                  )}
+
+                  {bagProgress && (
+                    <View style={styles.bagRow}>
+                      <View style={styles.bagProgress}>
+                        <BagProgress
+                          loaded={bagProgress.loaded}
+                          total={bagProgress.total}
+                        />
+                      </View>
+
+                      <Pressable
+                        accessibilityRole="button"
+                        onPress={() => router.push('/scan-qr')}
+                        style={({ pressed }) => [
+                          styles.scanButton,
+                          pressed && styles.pressed,
+                        ]}
+                      >
+                        <Icon name="scanQr" size={16} color={RED} />
+                        <Text style={styles.scanButtonText}>Scan bags</Text>
+                      </Pressable>
+                    </View>
+                  )}
+
+                  {!isCompleted && startDisabled && (
+                    <Text style={styles.blockedText}>{startBlocked}</Text>
+                  )}
+
+                  {!isCompleted && (
+                    <Pressable
+                      accessibilityRole="button"
+                      disabled={isUpdating || startDisabled}
+                      onPress={() => updateTask(assignment)}
+                      style={({ pressed }) => [
+                        styles.taskAction,
+                        !isAssigned && styles.completeAction,
+                        pressed && styles.pressed,
+                        (isUpdating || startDisabled) && styles.disabledButton,
+                      ]}
+                    >
+                      {isUpdating ? (
+                        <ActivityIndicator
+                          size="small"
+                          color={isAssigned ? WHITE : RED}
+                        />
+                      ) : (
+                        <Text
+                          style={[
+                            styles.taskActionText,
+                            !isAssigned && styles.completeActionText,
+                          ]}
+                        >
+                          {isAssigned ? 'Start task' : 'Mark completed'}
+                        </Text>
+                      )}
+                    </Pressable>
+                  )}
+
+                  {isCompleted && (
+                    <View style={styles.completedRow}>
+                      <Icon name="checkCircle" size={16} color={GREEN} />
+                      <Text style={styles.completedText}>Task completed</Text>
+                    </View>
+                  )}
                 </View>
               );
             })}
@@ -645,7 +651,9 @@ const styles = StyleSheet.create({
   },
 
   searchBox: {
-    backgroundColor: '#ECECEF',
+    backgroundColor: AeroSyncColors.surface,
+    borderWidth: 1,
+    borderColor: BORDER,
     borderRadius: 17,
     minHeight: 45,
     paddingHorizontal: 13,
@@ -655,8 +663,6 @@ const styles = StyleSheet.create({
   },
 
   searchIcon: {
-    color: CHARCOAL,
-    fontSize: 22,
     marginRight: 9,
   },
 
@@ -668,9 +674,7 @@ const styles = StyleSheet.create({
   },
 
   clearSearch: {
-    color: MUTED,
-    fontSize: 14,
-    paddingHorizontal: 5,
+    padding: 5,
   },
 
   listHeading: {
@@ -703,63 +707,64 @@ const styles = StyleSheet.create({
   },
 
   taskRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 13,
+    paddingHorizontal: 14,
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#EEEEEE',
-    gap: 8,
+    borderBottomColor: BORDER,
+    gap: 9,
   },
 
-  taskMain: {
-    flex: 1,
-    minWidth: 0,
-  },
-
-  taskTopLine: {
+  shiftTime: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
-  },
-
-  flightNumber: {
-    color: CHARCOAL,
-    fontSize: 14,
-    fontWeight: '900',
-    flex: 1,
-    minWidth: 0,
+    gap: 4,
   },
 
   taskTime: {
     color: CHARCOAL,
     fontSize: 12,
-    fontWeight: '900',
-    minWidth: 42,
-    textAlign: 'right',
+    fontWeight: '800',
   },
 
-  statusBadge: {
-    paddingHorizontal: 9,
-    paddingVertical: 6,
-    borderRadius: 18,
-    minWidth: 67,
-    maxWidth: 105,
+  bagRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 10,
   },
 
-  statusText: {
-    fontSize: 9,
-    fontWeight: '900',
+  bagProgress: {
+    flex: 1,
+    minWidth: 0,
+  },
+
+  scanButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderWidth: 1,
+    borderColor: RED,
+    borderRadius: 18,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+
+  scanButtonText: {
+    color: RED,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+
+  blockedText: {
+    color: AeroSyncColors.warning,
+    fontSize: 11,
+    fontWeight: '700',
   },
 
   taskBottomLine: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 8,
-    marginTop: 6,
+    gap: 10,
   },
 
   activity: {
@@ -775,50 +780,46 @@ const styles = StyleSheet.create({
   },
 
   overdueText: {
-    color: '#B42318',
-    fontSize: 9,
+    color: AeroSyncColors.danger,
+    fontSize: 11,
     fontWeight: '700',
-    marginTop: 6,
   },
 
   taskAction: {
-    alignSelf: 'flex-start',
-    marginTop: 9,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 6,
-    backgroundColor: '#FFF1F3',
-    minWidth: 90,
+    minHeight: 42,
+    borderRadius: 10,
+    backgroundColor: RED,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 14,
   },
 
   taskActionText: {
-    color: RED,
-    fontSize: 9,
+    color: WHITE,
+    fontSize: 13,
     fontWeight: '900',
-    letterSpacing: 0.3,
   },
 
   completeAction: {
-    backgroundColor: '#F1F1F1',
+    backgroundColor: WHITE,
+    borderWidth: 1.5,
+    borderColor: RED,
   },
 
   completeActionText: {
-    color: CHARCOAL,
+    color: RED,
+  },
+
+  completedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
 
   completedText: {
     color: GREEN,
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: '800',
-    marginTop: 8,
-  },
-
-  chevron: {
-    color: '#888888',
-    fontSize: 25,
-    paddingHorizontal: 2,
   },
 
   pressed: {
@@ -843,7 +844,7 @@ const styles = StyleSheet.create({
   },
 
   errorText: {
-    color: '#B42318',
+    color: AeroSyncColors.danger,
     fontSize: 12,
     textAlign: 'center',
   },
@@ -854,12 +855,6 @@ const styles = StyleSheet.create({
     padding: 28,
     alignItems: 'center',
     gap: 8,
-  },
-
-  emptyIcon: {
-    color: GREEN,
-    fontSize: 27,
-    fontWeight: '900',
   },
 
   emptyTitle: {

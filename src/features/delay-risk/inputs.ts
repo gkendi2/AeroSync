@@ -5,7 +5,7 @@
  *   time_remaining_minutes = minutes from now to departureDate + departureTime (local time)
  *   baggage_progress_pct   = 100 × (bags Loading or Offloaded) ÷ (bags for this departure)
  *   staff_availability_pct = 100 × (assigned handlers available) ÷ (assigned handlers)
- *   unresolved_incidents   = incidents for the flight that are Open or Under Investigation
+ *   unresolved_incidents   = incidents for the flight whose status is anything but Resolved or Closed
  *
  * Flight numbers are compared after normalising both sides (uppercase, no spaces/hyphens).
  */
@@ -70,7 +70,13 @@ export type FlightLiveInputs = {
 
 const BAGGAGE_WINDOW_MS = 24 * 60 * 60 * 1000;
 const HANDLED_BAG_STATUSES = ['loading', 'offloaded'];
-const UNRESOLVED_INCIDENT_STATUSES = ['open', 'under investigation'];
+// The app writes Open, Under Review, Resolved and Closed. Every status except
+// the two finished ones counts as unresolved.
+const RESOLVED_INCIDENT_STATUSES = ['resolved', 'closed'];
+
+export function isUnresolvedIncidentStatus(status: string): boolean {
+  return !RESOLVED_INCIDENT_STATUSES.includes(lower(status));
+}
 
 function sameFlightNumber(a: string, b: string) {
   const left = normalizeFlightNumber(a);
@@ -183,7 +189,7 @@ function countUnresolvedIncidents(flight: FlightRecord, incidents: IncidentRecor
       ? incident.flightId === flight.id
       : sameFlightNumber(incident.flightNumber, flight.flightNumber);
 
-    return belongs && UNRESOLVED_INCIDENT_STATUSES.includes(lower(incident.status));
+    return belongs && isUnresolvedIncidentStatus(incident.status);
   }).length;
 }
 

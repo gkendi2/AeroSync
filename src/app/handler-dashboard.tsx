@@ -13,6 +13,7 @@ import {
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   ImageBackground,
   Pressable,
   ScrollView,
@@ -21,6 +22,24 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import AeroSyncLogo from '@/components/aerosync-logo';
+import FlightStrip from '@/components/flight-strip';
+import Icon from '@/components/icon';
+import StatusBadge, { taskStatusTone } from '@/components/status-badge';
+import { AeroSyncColors } from '@/constants/theme';
+import { toTimeString } from '@/features/datetime/format';
+import { flightRoute, useFlights } from '@/features/handler/hooks';
+import {
+  attendanceState,
+  findFlightForTask,
+  formatDuration,
+  isOverdue,
+  startBlockedReason,
+  summariseDay,
+} from '@/features/handler/tasks';
+import { advanceTask } from '@/features/handler/taskService';
+import { confirmAction } from '@/lib/confirm';
 
 type Assignment = {
   id: string;
@@ -40,17 +59,15 @@ type Attendance = {
   checkOutAt?: Timestamp | null;
 };
 
-const RED = '#C8102E';
-const DARK_RED = '#A20D25';
-const CHARCOAL = '#252525';
-const BACKGROUND = '#F5F5F6';
-const WHITE = '#FFFFFF';
-const MUTED = '#777777';
-const BORDER = '#E7E7E9';
-const GREEN = '#16805C';
-const PALE_RED = '#FCEBED';
-const BLUE = '#1764B4';
-const PALE_BLUE = '#E8F1FF';
+const RED = AeroSyncColors.primaryDark;
+const CHARCOAL = AeroSyncColors.text;
+const BACKGROUND = AeroSyncColors.background;
+const WHITE = AeroSyncColors.white;
+const MUTED = AeroSyncColors.textSecondary;
+const BORDER = AeroSyncColors.border;
+const GREEN = AeroSyncColors.success;
+const PALE_RED = AeroSyncColors.primaryLight;
+const BLUE = AeroSyncColors.info;
 
 function getLocalDateKey(date: Date) {
   const year = date.getFullYear();
@@ -91,60 +108,17 @@ function isTodayShift(shiftDate: string, today: string) {
   );
 }
 
-function formatTime(value?: Timestamp | null) {
-  if (!value || typeof value.toDate !== 'function') {
-    return 'Not recorded';
-  }
-
-  return value.toDate().toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-function formatDuration(
-  checkInAt?: Timestamp | null,
-  checkOutAt?: Timestamp | null
-) {
-  if (!checkInAt || !checkOutAt) {
-    return 'Still on duty';
-  }
-
-  const milliseconds =
-    checkOutAt.toMillis() - checkInAt.toMillis();
-
-  if (milliseconds < 0) return 'Unavailable';
-
-  const minutes = Math.floor(milliseconds / 60000);
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-
-  return `${hours}h ${remainingMinutes}m`;
-}
-
-function getStatusStyle(status: string) {
-  if (status === 'Completed') {
-    return {
-      backgroundColor: '#E8F5EF',
-      color: GREEN,
-    };
-  }
-
-  if (status === 'In Progress') {
-    return {
-      backgroundColor: PALE_BLUE,
-      color: BLUE,
-    };
-  }
-
-  return {
-    backgroundColor: '#F0F0F0',
-    color: MUTED,
-  };
+/** HH:MM of a Firestore timestamp, or '--:--' when not recorded yet. */
+function formatClock(value?: Timestamp | null) {
+  return value && typeof value.toDate === 'function'
+    ? toTimeString(value.toDate())
+    : '--:--';
 }
 
 export default function HandlerDashboard() {
+  const router = useRouter();
   const user = auth.currentUser;
+  const flights = useFlights();
 
   const today = getLocalDateKey(new Date());
 
@@ -164,6 +138,7 @@ export default function HandlerDashboard() {
   const [updatingAttendance, setUpdatingAttendance] = useState(false);
 
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
 
   const attendanceId = user ? `${user.uid}_${today}` : '';
 
@@ -338,33 +313,74 @@ export default function HandlerDashboard() {
     }
   }
 
-  // Existing assignment calculations.
-  const todaysAssignments = assignments.filter((assignment) =>
-    isTodayShift(assignment.shiftDate, today)
+  // Today's tasks. Older records may store shiftDate in another format,
+  // so the date is matched with isTodayShift first.
+  const summary = summariseDay(
+    assignments.map((assignment) =>
+      isTodayShift(assignment.shiftDate, today)
+        ? { ...assignment, shiftDate: today }
+        : assignment
+    ),
+    today
   );
 
-  const completedCount = todaysAssignments.filter(
-    (assignment) => assignment.status === 'Completed'
-  ).length;
-
-  const inProgressCount = todaysAssignments.filter(
-    (assignment) => assignment.status === 'In Progress'
-  ).length;
-
-  const pendingCount = todaysAssignments.filter(
-    (assignment) =>
-      assignment.status !== 'Completed' &&
-      assignment.status !== 'In Progress'
-  ).length;
-
-  const nextAssignment = todaysAssignments.find(
-    (assignment) =>
-      assignment.status !== 'Completed' &&
-      assignment.status !== 'Cancelled'
+  const nextAssignment = summary.tasks.find(
+    (assignment) => assignment.status !== 'Completed'
   );
+  const nextFlight = nextAssignment
+    ? findFlightForTask(nextAssignment, flights)
+    : null;
+  const nextOverdue = nextAssignment
+    ? isOverdue(nextAssignment, currentTime)
+    : false;
 
-  const isCheckedIn = attendance?.status === 'Checked In';
-  const isCheckedOut = attendance?.status === 'Checked Out';
+  const shiftState = attendanceState(attendance?.status);
+  const startBlocked = startBlockedReason(attendance?.status);
+
+  const checkInMs = attendance?.checkInAt?.toMillis?.();
+  const checkOutMs = attendance?.checkOutAt?.toMillis?.();
+  const shiftDuration =
+    checkInMs === undefined
+      ? null
+      : formatDuration(
+          (shiftState === 'checked-out' && checkOutMs !== undefined
+            ? checkOutMs
+            : currentTime.getTime()) - checkInMs
+        );
+
+  const nextActionDisabled =
+    !!nextAssignment &&
+    (updatingTaskId === nextAssignment.id ||
+      (nextAssignment.status === 'Assigned' && !!startBlocked));
+
+  function openMyTasks() {
+    router.push('/explore');
+  }
+
+  async function handleTaskAction(assignment: Assignment) {
+    if (updatingTaskId) return;
+    if (assignment.status === 'Assigned' && startBlocked) return;
+
+    if (assignment.status === 'In Progress') {
+      const confirmed = await confirmAction({
+        title: 'Mark completed?',
+        message: `Mark ${assignment.flightNumber} · ${assignment.activity} as completed?`,
+        confirmLabel: 'Mark completed',
+      });
+      if (!confirmed) return;
+    }
+
+    setUpdatingTaskId(assignment.id);
+
+    try {
+      await advanceTask(assignment.id, assignment.status);
+    } catch (error) {
+      console.error('Could not update task:', error);
+      Alert.alert('Update failed', 'Your task could not be updated. Please try again.');
+    } finally {
+      setUpdatingTaskId(null);
+    }
+  }
 
   const greeting =
     currentTime.getHours() < 12
@@ -381,9 +397,7 @@ export default function HandlerDashboard() {
       >
         {/* AeroSync brand header */}
         <View style={styles.header}>
-          <View style={styles.brandMark}>
-            <Text style={styles.brandMarkText}>K</Text>
-          </View>
+          <AeroSyncLogo size={48} />
 
           <View style={styles.brandInfo}>
             <Text style={styles.brandName}>AeroSync</Text>
@@ -391,80 +405,120 @@ export default function HandlerDashboard() {
           </View>
         </View>
 
-        {/* Hero and overlapping workload card */}
-        <View style={styles.heroSection}>
-          <ImageBackground
-            source={require('../../assets/images/Dashboard-photo.png')}
-            style={styles.hero}
-            imageStyle={styles.heroImage}
-            resizeMode="cover"
-          >
-            <View style={styles.heroOverlay}>
-              <Text style={styles.greeting}>{greeting},</Text>
-              <Text style={styles.handlerName}>Handler.</Text>
-              <Text style={styles.heroSubtitle}>
-                Your tasks for today.
-              </Text>
-              <Text style={styles.dateText}>
-                {currentTime.toLocaleDateString([], {
-                  weekday: 'short',
-                  day: 'numeric',
-                  month: 'short',
-                })}
-              </Text>
-            </View>
-          </ImageBackground>
-
-          {/* Floating workload summary */}
-          <View style={styles.statsCard}>
-            <View style={styles.statsHeading}>
-              <View>
-                <Text style={styles.statsTitle}>Today's workload</Text>
-                <Text style={styles.statsSubtitle}>
-                  Your assigned ground activities
-                </Text>
-              </View>
-              <Text style={styles.statsChevron}>›</Text>
-            </View>
-
-            <View style={styles.statsRow}>
-              <View style={styles.statItem}>
-                <Text style={styles.statNumber}>
-                  {loadingAssignments ? '—' : pendingCount}
-                </Text>
-                <Text style={styles.statLabel}>Assigned</Text>
-              </View>
-
-              <View style={styles.statDivider} />
-
-              <View style={styles.statItem}>
-                <Text style={styles.statNumber}>
-                  {loadingAssignments ? '—' : inProgressCount}
-                </Text>
-                <Text style={styles.statLabel}>In Progress</Text>
-              </View>
-
-              <View style={styles.statDivider} />
-
-              <View style={styles.statItem}>
-                <Text style={[styles.statNumber, { color: RED }]}>
-                  {loadingAssignments ? '—' : completedCount}
-                </Text>
-                <Text style={styles.statLabel}>Completed</Text>
-              </View>
-            </View>
-          </View>
-        </View>
-
-        {/* My Tasks */}
-        <View style={styles.sectionHeader}>
-          <View>
-            <Text style={styles.sectionTitle}>My Tasks</Text>
-            <Text style={styles.sectionSubtitle}>
-              Your next scheduled activity
+        {/* Greeting */}
+        <ImageBackground
+          source={require('../../assets/images/Dashboard-photo.png')}
+          style={styles.hero}
+          imageStyle={styles.heroImage}
+          resizeMode="cover"
+        >
+          <View style={styles.heroOverlay}>
+            <Text style={styles.greeting}>{greeting},</Text>
+            <Text style={styles.handlerName}>Handler.</Text>
+            <Text style={styles.dateText}>
+              {currentTime.toLocaleDateString([], {
+                weekday: 'short',
+                day: 'numeric',
+                month: 'short',
+              })}
             </Text>
           </View>
+        </ImageBackground>
+
+        {/* 1. Attendance */}
+        <View style={styles.card}>
+          {loadingAttendance ? (
+            <View style={styles.attendanceLoading}>
+              <ActivityIndicator color={RED} />
+              <Text style={styles.muted}>Loading attendance...</Text>
+            </View>
+          ) : shiftState === 'not-checked-in' ? (
+            <>
+              <View style={styles.cardHeading}>
+                <Icon name="clock" size={22} color={MUTED} />
+                <View style={styles.cardHeadingCopy}>
+                  <Text style={styles.cardTitle}>Not checked in</Text>
+                  <Text style={styles.cardSubtitle}>
+                    Check in when your shift begins
+                  </Text>
+                </View>
+              </View>
+
+              <Pressable
+                style={({ pressed }) => [
+                  styles.checkInButton,
+                  pressed && styles.pressed,
+                  updatingAttendance && styles.disabledButton,
+                ]}
+                disabled={updatingAttendance}
+                onPress={() => recordAttendance('checkIn')}
+              >
+                {updatingAttendance ? (
+                  <ActivityIndicator color={WHITE} />
+                ) : (
+                  <>
+                    <Icon name="checkIn" size={24} color={WHITE} />
+                    <Text style={styles.checkInButtonText}>Check in</Text>
+                  </>
+                )}
+              </Pressable>
+            </>
+          ) : shiftState === 'on-shift' ? (
+            <>
+              <View style={styles.cardHeading}>
+                <View style={[styles.stateDot, { backgroundColor: GREEN }]} />
+                <View style={styles.cardHeadingCopy}>
+                  <Text style={styles.cardTitle}>
+                    On shift since {formatClock(attendance?.checkInAt)}
+                    {shiftDuration ? ` · ${shiftDuration}` : ''}
+                  </Text>
+                  <Text style={styles.cardSubtitle}>
+                    Check out when your shift ends
+                  </Text>
+                </View>
+              </View>
+
+              <Pressable
+                style={({ pressed }) => [
+                  styles.checkoutButton,
+                  pressed && styles.pressed,
+                  updatingAttendance && styles.disabledButton,
+                ]}
+                disabled={updatingAttendance}
+                onPress={() => recordAttendance('checkOut')}
+              >
+                {updatingAttendance ? (
+                  <ActivityIndicator color={RED} />
+                ) : (
+                  <>
+                    <Icon name="checkOut" size={20} color={RED} />
+                    <Text style={styles.checkoutButtonText}>Check out</Text>
+                  </>
+                )}
+              </Pressable>
+            </>
+          ) : (
+            <View style={styles.cardHeading}>
+              <Icon name="checkCircle" size={24} color={GREEN} />
+              <View style={styles.cardHeadingCopy}>
+                <Text style={styles.cardTitle}>
+                  Shift complete{shiftDuration ? ` · ${shiftDuration}` : ''}
+                </Text>
+                <Text style={styles.cardSubtitle}>
+                  {formatClock(attendance?.checkInAt)}–
+                  {formatClock(attendance?.checkOutAt)}
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {!!attendanceError && (
+            <Text style={styles.errorText}>{attendanceError}</Text>
+          )}
         </View>
+
+        {/* 2. Next task */}
+        <Text style={styles.sectionTitle}>Next task</Text>
 
         {loadingAssignments ? (
           <View style={styles.messageCard}>
@@ -476,255 +530,144 @@ export default function HandlerDashboard() {
             <Text style={styles.errorText}>{assignmentError}</Text>
           </View>
         ) : nextAssignment ? (
-          <View style={styles.taskCard}>
-            <View style={styles.taskIcon}>
-              <Text style={styles.taskIconText}>✈</Text>
+          <Pressable
+            style={({ pressed }) => [styles.card, pressed && styles.pressed]}
+            onPress={openMyTasks}
+            accessibilityRole="button"
+            accessibilityHint="Opens My Tasks"
+          >
+            <FlightStrip
+              flightNumber={nextAssignment.flightNumber}
+              route={flightRoute(nextFlight)}
+              departure={
+                nextFlight?.departureTime
+                  ? `Dep ${nextFlight.departureTime}`
+                  : undefined
+              }
+              right={
+                <StatusBadge
+                  label={nextOverdue ? 'Overdue' : nextAssignment.status}
+                  tone={taskStatusTone(nextAssignment.status, nextOverdue)}
+                />
+              }
+            />
+
+            <View style={styles.taskMeta}>
+              <Text style={styles.taskActivity} numberOfLines={1}>
+                {nextAssignment.activity}
+              </Text>
+              <Text style={styles.taskTime}>{nextAssignment.shiftTime}</Text>
             </View>
 
-            <View style={styles.taskInfo}>
-              <Text style={styles.taskFlight} numberOfLines={1}>
-                {nextAssignment.flightNumber} – {nextAssignment.activity}
-              </Text>
+            {nextAssignment.status === 'Assigned' && !!startBlocked && (
+              <Text style={styles.blockedText}>{startBlocked}</Text>
+            )}
 
-              <Text style={styles.taskTime} numberOfLines={1}>
-                {nextAssignment.shiftDate} · {nextAssignment.shiftTime}
-              </Text>
-            </View>
-
-            <View
-              style={[
-                styles.taskStatusBadge,
-                {
-                  backgroundColor: getStatusStyle(nextAssignment.status)
-                    .backgroundColor,
-                },
+            <Pressable
+              style={({ pressed }) => [
+                nextAssignment.status === 'Assigned'
+                  ? styles.primaryButton
+                  : styles.secondaryButton,
+                pressed && styles.pressed,
+                nextActionDisabled && styles.disabledButton,
               ]}
+              disabled={nextActionDisabled}
+              onPress={() => handleTaskAction(nextAssignment)}
             >
-              <Text
-                style={[
-                  styles.taskStatusText,
-                  { color: getStatusStyle(nextAssignment.status).color },
-                ]}
-              >
-                {nextAssignment.status}
-              </Text>
-            </View>
-
-            <Text style={styles.taskChevron}>›</Text>
-          </View>
+              {updatingTaskId === nextAssignment.id ? (
+                <ActivityIndicator
+                  color={nextAssignment.status === 'Assigned' ? WHITE : RED}
+                />
+              ) : (
+                <Text
+                  style={
+                    nextAssignment.status === 'Assigned'
+                      ? styles.primaryButtonText
+                      : styles.secondaryButtonText
+                  }
+                >
+                  {nextAssignment.status === 'Assigned'
+                    ? 'Start task'
+                    : 'Mark completed'}
+                </Text>
+              )}
+            </Pressable>
+          </Pressable>
         ) : (
           <View style={styles.emptyCard}>
-            <View style={styles.emptyIcon}>
-              <Text style={styles.emptyIconText}>✓</Text>
-            </View>
+            <Icon name="checkCircle" size={28} color={GREEN} />
             <Text style={styles.emptyTitle}>
-              {todaysAssignments.length > 0
+              {summary.total > 0
                 ? 'All activities completed'
                 : 'No upcoming assignment'}
             </Text>
             <Text style={styles.muted}>
-              {todaysAssignments.length > 0
-                ? 'You have completed all the activities currently assigned to you today.'
-                : 'You do not have an upcoming activity scheduled for today.'}
+              {summary.total > 0
+                ? 'You have completed all the activities assigned to you today.'
+                : 'You do not have an activity scheduled for today.'}
             </Text>
           </View>
         )}
 
-        {/* Today's work breakdown */}
-        <View style={styles.sectionHeader}>
-          <View>
-            <Text style={styles.sectionTitle}>Today's Work</Text>
-            <Text style={styles.sectionSubtitle}>
-              Your assigned ground activities
-            </Text>
-          </View>
-
-          <View style={styles.todayBadge}>
-            <Text style={styles.todayBadgeText}>TODAY</Text>
-          </View>
-        </View>
-
-        {loadingAssignments ? (
-          <View style={styles.messageCard}>
-            <ActivityIndicator color={RED} />
-            <Text style={styles.muted}>Loading your assignments...</Text>
-          </View>
-        ) : assignmentError ? (
-          <View style={styles.messageCard}>
-            <Text style={styles.errorText}>{assignmentError}</Text>
-          </View>
-        ) : (
-          <View style={styles.workCard}>
-            <View style={styles.workSummaryTop}>
-              <View>
-                <Text style={styles.workCount}>
-                  {todaysAssignments.length}
-                </Text>
-                <Text style={styles.workCountLabel}>
-                  Activities assigned
+        {/* 3. Today's work */}
+        {!loadingAssignments && !assignmentError && (
+          <Pressable
+            style={({ pressed }) => [styles.card, pressed && styles.pressed]}
+            onPress={openMyTasks}
+            accessibilityRole="button"
+            accessibilityHint="Opens My Tasks"
+          >
+            <View style={styles.cardHeading}>
+              <View style={styles.cardHeadingCopy}>
+                <Text style={styles.cardTitle}>Today's work</Text>
+                <Text style={styles.cardSubtitle}>
+                  {summary.completed} of {summary.total} tasks done
                 </Text>
               </View>
-
-              <View style={styles.workStats}>
-                <Text style={styles.workStatText}>
-                  {pendingCount} Not started
-                </Text>
-                <Text style={styles.workStatText}>
-                  {inProgressCount} In progress
-                </Text>
-                <Text style={styles.workStatText}>
-                  {completedCount} Completed
-                </Text>
-              </View>
+              <Icon name="forward" size={24} color={MUTED} />
             </View>
 
-            {todaysAssignments.length > 0 && (
-              <Text style={styles.moreAssignments}>
-                Your task counts update automatically.
-              </Text>
-            )}
-          </View>
-        )}
-
-        {/* Attendance */}
-        <View style={styles.attendanceCard}>
-          <View style={styles.attendanceHeader}>
-            <View>
-              <Text style={styles.sectionTitle}>Attendance</Text>
-              <Text style={styles.sectionSubtitle}>
-                Your daily shift record
-              </Text>
-            </View>
-
-            <View
-              style={[
-                styles.attendanceStatus,
-                isCheckedIn && styles.attendanceStatusActive,
-                isCheckedOut && styles.attendanceStatusComplete,
-              ]}
-            >
+            <View style={styles.progressTrack}>
               <View
                 style={[
-                  styles.statusDot,
-                  isCheckedIn && styles.activeDot,
-                  isCheckedOut && styles.completeDot,
+                  styles.progressFill,
+                  {
+                    width: `${
+                      summary.total > 0
+                        ? (summary.completed / summary.total) * 100
+                        : 0
+                    }%`,
+                  },
                 ]}
               />
-              <Text
-                style={[
-                  styles.attendanceStatusText,
-                  isCheckedIn && { color: RED },
-                  isCheckedOut && { color: GREEN },
-                ]}
-              >
-                {loadingAttendance
-                  ? 'LOADING'
-                  : isCheckedIn
-                    ? 'ON DUTY'
-                    : isCheckedOut
-                      ? 'COMPLETED'
-                      : 'NOT CHECKED IN'}
-              </Text>
             </View>
-          </View>
 
-          {loadingAttendance ? (
-            <View style={styles.attendanceLoading}>
-              <ActivityIndicator color={RED} />
-              <Text style={styles.muted}>Loading attendance...</Text>
-            </View>
-          ) : (
-            <>
-              <View style={styles.attendanceTimes}>
-                <View style={styles.attendanceTimeBlock}>
-                  <Text style={styles.timeLabel}>CHECK IN</Text>
-                  <Text style={styles.timeValue}>
-                    {formatTime(attendance?.checkInAt)}
-                  </Text>
-                </View>
-
-                <View style={styles.attendanceTimeDivider} />
-
-                <View style={styles.attendanceTimeBlock}>
-                  <Text style={styles.timeLabel}>CHECK OUT</Text>
-                  <Text style={styles.timeValue}>
-                    {formatTime(attendance?.checkOutAt)}
-                  </Text>
-                </View>
+            <View style={styles.statsRow}>
+              <View style={styles.statItem}>
+                <Text style={styles.statNumber}>{summary.assigned}</Text>
+                <Text style={styles.statLabel}>Assigned</Text>
               </View>
 
-              {!attendance && (
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.attendanceButton,
-                    pressed && styles.pressed,
-                    updatingAttendance && styles.disabledButton,
-                  ]}
-                  disabled={updatingAttendance}
-                  onPress={() => recordAttendance('checkIn')}
-                >
-                  {updatingAttendance ? (
-                    <ActivityIndicator color={WHITE} />
-                  ) : (
-                    <Text style={styles.attendanceButtonText}>
-                      CHECK IN FOR TODAY
-                    </Text>
-                  )}
-                </Pressable>
-              )}
+              <View style={styles.statDivider} />
 
-              {isCheckedIn && (
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.checkoutButton,
-                    pressed && styles.pressed,
-                    updatingAttendance && styles.disabledButton,
-                  ]}
-                  disabled={updatingAttendance}
-                  onPress={() => recordAttendance('checkOut')}
-                >
-                  {updatingAttendance ? (
-                    <ActivityIndicator color={RED} />
-                  ) : (
-                    <Text style={styles.checkoutButtonText}>
-                      CHECK OUT
-                    </Text>
-                  )}
-                </Pressable>
-              )}
+              <View style={styles.statItem}>
+                <Text style={[styles.statNumber, { color: BLUE }]}>
+                  {summary.inProgress}
+                </Text>
+                <Text style={styles.statLabel}>In progress</Text>
+              </View>
 
-              {isCheckedOut && (
-                <View style={styles.completedBanner}>
-                  <Text style={styles.completedBannerText}>
-                    Your attendance for today is complete.
-                  </Text>
-                </View>
-              )}
+              <View style={styles.statDivider} />
 
-              {isCheckedOut && (
-                <View style={styles.durationContainer}>
-                  <Text style={styles.durationLabel}>
-                    Total recorded shift duration
-                  </Text>
-                  <Text style={styles.durationValue}>
-                    {formatDuration(
-                      attendance?.checkInAt,
-                      attendance?.checkOutAt
-                    )}
-                  </Text>
-                </View>
-              )}
-            </>
-          )}
-
-          {!!attendanceError && (
-            <Text style={styles.errorText}>{attendanceError}</Text>
-          )}
-
-          <Text style={styles.attendanceNote}>
-            Attendance is recorded separately from your assigned tasks.
-          </Text>
-        </View>
+              <View style={styles.statItem}>
+                <Text style={[styles.statNumber, { color: GREEN }]}>
+                  {summary.completed}
+                </Text>
+                <Text style={styles.statLabel}>Completed</Text>
+              </View>
+            </View>
+          </Pressable>
+        )}
 
         {/* Helpful information */}
         <View style={styles.infoCard}>
@@ -768,21 +711,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
   },
 
-  brandMark: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: RED,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  brandMarkText: {
-    color: WHITE,
-    fontSize: 29,
-    fontWeight: '900',
-  },
-
   brandInfo: {
     flex: 1,
     gap: 1,
@@ -802,165 +730,55 @@ const styles = StyleSheet.create({
     letterSpacing: 1.8,
   },
 
-  heroSection: {
-    height: 415,
-    position: 'relative',
-    marginBottom: 0,
-  },
-
   hero: {
-    height: 340,
+    height: 200,
     width: '100%',
     justifyContent: 'flex-start',
     backgroundColor: '#DCE5EB',
+    borderRadius: 18,
+    overflow: 'hidden',
   },
 
   heroImage: {
-    borderRadius: 0,
+    borderRadius: 18,
   },
 
   heroOverlay: {
     flex: 1,
     justifyContent: 'flex-start',
-    paddingHorizontal: 22,
-    paddingTop: 28,
+    paddingHorizontal: 20,
+    paddingTop: 20,
     backgroundColor: 'rgba(255,255,255,0.08)',
   },
 
   greeting: {
     color: CHARCOAL,
-    fontSize: 34,
+    fontSize: 28,
     fontWeight: '900',
-    letterSpacing: -1.2,
+    letterSpacing: -1,
   },
 
   handlerName: {
     color: CHARCOAL,
-    fontSize: 35,
+    fontSize: 28,
     fontWeight: '900',
-    letterSpacing: -1.2,
-  },
-
-  heroSubtitle: {
-    color: '#454545',
-    fontSize: 14,
-    fontWeight: '600',
-    marginTop: 7,
+    letterSpacing: -1,
   },
 
   dateText: {
     color: '#555555',
     fontSize: 13,
     fontWeight: '600',
-    marginTop: 12,
+    marginTop: 8,
   },
 
-  statsCard: {
-    position: 'absolute',
-    left: 14,
-    right: 14,
-    bottom: 0,
-    minHeight: 165,
+  card: {
     backgroundColor: WHITE,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#EEEEEF',
-    paddingHorizontal: 17,
-    paddingVertical: 16,
-    justifyContent: 'space-between',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.09,
-    shadowRadius: 12,
-    elevation: 5,
-  },
-
-  statsHeading: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-
-  statsTitle: {
-    color: CHARCOAL,
-    fontSize: 17,
-    fontWeight: '900',
-  },
-
-  statsSubtitle: {
-    color: MUTED,
-    fontSize: 11,
-    marginTop: 3,
-  },
-
-  statsChevron: {
-    color: MUTED,
-    fontSize: 27,
-    fontWeight: '500',
-  },
-
-  statsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 15,
-  },
-
-  statItem: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 3,
-  },
-
-  statNumber: {
-    color: CHARCOAL,
-    fontSize: 29,
-    fontWeight: '900',
-  },
-
-  statLabel: {
-    color: MUTED,
-    fontSize: 11,
-    fontWeight: '500',
-  },
-
-  statDivider: {
-    width: 1,
-    height: 48,
-    backgroundColor: BORDER,
-  },
-
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-    marginTop: 3,
-    paddingHorizontal: 2,
-  },
-
-  sectionTitle: {
-    color: CHARCOAL,
-    fontSize: 19,
-    fontWeight: '900',
-  },
-
-  sectionSubtitle: {
-    color: MUTED,
-    fontSize: 11,
-    marginTop: 3,
-  },
-
-  taskCard: {
-    minHeight: 82,
-    backgroundColor: WHITE,
-    borderRadius: 16,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: BORDER,
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 11,
-    gap: 10,
+    padding: 16,
+    gap: 13,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
@@ -968,55 +786,100 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
 
-  taskIcon: {
-    width: 47,
-    height: 47,
-    borderRadius: 13,
-    backgroundColor: PALE_RED,
+  cardHeading: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 11,
   },
 
-  taskIconText: {
-    color: RED,
-    fontSize: 26,
-    fontWeight: '800',
-  },
-
-  taskInfo: {
+  cardHeadingCopy: {
     flex: 1,
     minWidth: 0,
-    gap: 5,
+    gap: 3,
   },
 
-  taskFlight: {
+  cardTitle: {
     color: CHARCOAL,
-    fontSize: 12,
+    fontSize: 16,
     fontWeight: '900',
+  },
+
+  cardSubtitle: {
+    color: MUTED,
+    fontSize: 12,
+  },
+
+  stateDot: {
+    width: 11,
+    height: 11,
+    borderRadius: 6,
+    marginHorizontal: 6,
+  },
+
+  sectionTitle: {
+    color: CHARCOAL,
+    fontSize: 19,
+    fontWeight: '900',
+    marginBottom: -8,
+    paddingHorizontal: 2,
+  },
+
+  taskMeta: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 10,
+  },
+
+  taskActivity: {
+    color: CHARCOAL,
+    fontSize: 13,
+    fontWeight: '700',
+    flex: 1,
   },
 
   taskTime: {
     color: MUTED,
-    fontSize: 10,
+    fontSize: 12,
+    fontWeight: '700',
   },
 
-  taskStatusBadge: {
-    borderRadius: 18,
-    paddingHorizontal: 8,
-    paddingVertical: 7,
+  blockedText: {
+    color: AeroSyncColors.warning,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+
+  primaryButton: {
+    minHeight: 46,
+    backgroundColor: RED,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 14,
   },
 
-  taskStatusText: {
-    fontSize: 9,
-    fontWeight: '800',
+  primaryButtonText: {
+    color: WHITE,
+    fontSize: 14,
+    fontWeight: '900',
   },
 
-  taskChevron: {
-    color: CHARCOAL,
-    fontSize: 25,
-    paddingLeft: 1,
+  secondaryButton: {
+    minHeight: 46,
+    backgroundColor: WHITE,
+    borderWidth: 1.5,
+    borderColor: RED,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+  },
+
+  secondaryButtonText: {
+    color: RED,
+    fontSize: 14,
+    fontWeight: '900',
   },
 
   emptyCard: {
@@ -1029,21 +892,6 @@ const styles = StyleSheet.create({
     gap: 9,
   },
 
-  emptyIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 13,
-    backgroundColor: '#E8F5EF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  emptyIconText: {
-    color: GREEN,
-    fontSize: 23,
-    fontWeight: '900',
-  },
-
   emptyTitle: {
     color: CHARCOAL,
     fontSize: 14,
@@ -1051,64 +899,47 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  todayBadge: {
-    backgroundColor: PALE_RED,
-    borderRadius: 9,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
+  progressTrack: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: BORDER,
+    overflow: 'hidden',
   },
 
-  todayBadgeText: {
-    color: RED,
-    fontSize: 9,
-    fontWeight: '900',
+  progressFill: {
+    height: '100%',
+    borderRadius: 4,
+    backgroundColor: GREEN,
   },
 
-  workCard: {
-    backgroundColor: WHITE,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: BORDER,
-    padding: 15,
-    gap: 13,
-  },
-
-  workSummaryTop: {
+  statsRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 10,
   },
 
-  workCount: {
+  statItem: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 3,
+  },
+
+  statNumber: {
     color: CHARCOAL,
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: '900',
   },
 
-  workCountLabel: {
+  statLabel: {
     color: MUTED,
     fontSize: 11,
-    marginTop: 2,
+    fontWeight: '500',
   },
 
-  workStats: {
-    alignItems: 'flex-end',
-    gap: 5,
-  },
-
-  workStatText: {
-    color: MUTED,
-    fontSize: 10,
-    fontWeight: '600',
-  },
-
-  moreAssignments: {
-    color: MUTED,
-    fontSize: 10,
-    borderTopWidth: 1,
-    borderTopColor: BORDER,
-    paddingTop: 10,
+  statDivider: {
+    width: 1,
+    height: 40,
+    backgroundColor: BORDER,
   },
 
   messageCard: {
@@ -1128,121 +959,31 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  attendanceCard: {
-    backgroundColor: WHITE,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: BORDER,
-    padding: 16,
-    gap: 13,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 5,
-    elevation: 1,
-  },
-
-  attendanceHeader: {
+  checkInButton: {
+    minHeight: 58,
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 8,
-  },
-
-  attendanceStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#F0F0F0',
-    borderRadius: 20,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-
-  attendanceStatusActive: {
-    backgroundColor: '#FFF0F1',
-  },
-
-  attendanceStatusComplete: {
-    backgroundColor: '#E8F5EF',
-  },
-
-  statusDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: MUTED,
-  },
-
-  activeDot: {
+    gap: 10,
     backgroundColor: RED,
-  },
-
-  completeDot: {
-    backgroundColor: GREEN,
-  },
-
-  attendanceStatusText: {
-    color: MUTED,
-    fontSize: 9,
-    fontWeight: '900',
-  },
-
-  attendanceTimes: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: BACKGROUND,
-    borderRadius: 12,
-    padding: 13,
-  },
-
-  attendanceTimeBlock: {
-    flex: 1,
-    gap: 5,
-  },
-
-  timeLabel: {
-    color: MUTED,
-    fontSize: 9,
-    fontWeight: '900',
-    letterSpacing: 0.7,
-  },
-
-  timeValue: {
-    color: CHARCOAL,
-    fontSize: 17,
-    fontWeight: '900',
-  },
-
-  attendanceTimeDivider: {
-    width: 1,
-    height: 37,
-    backgroundColor: BORDER,
-    marginHorizontal: 12,
-  },
-
-  attendanceButton: {
-    minHeight: 45,
-    backgroundColor: RED,
-    borderRadius: 11,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 12,
   },
 
-  attendanceButtonText: {
+  checkInButtonText: {
     color: WHITE,
-    fontSize: 12,
+    fontSize: 18,
     fontWeight: '900',
-    letterSpacing: 0.5,
   },
 
   checkoutButton: {
-    minHeight: 45,
+    minHeight: 46,
+    flexDirection: 'row',
+    gap: 8,
     backgroundColor: WHITE,
     borderWidth: 1.5,
     borderColor: RED,
-    borderRadius: 22,
+    borderRadius: 23,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 12,
@@ -1250,7 +991,7 @@ const styles = StyleSheet.create({
 
   checkoutButtonText: {
     color: RED,
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '900',
   },
 
@@ -1261,46 +1002,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
 
-  completedBanner: {
-    backgroundColor: '#E8F5EF',
-    borderRadius: 11,
-    padding: 12,
-    alignItems: 'center',
-  },
-
-  completedBannerText: {
-    color: GREEN,
-    fontSize: 11,
-    fontWeight: '800',
-  },
-
-  durationContainer: {
-    borderTopWidth: 1,
-    borderTopColor: BORDER,
-    paddingTop: 11,
-    gap: 4,
-  },
-
-  durationLabel: {
-    color: MUTED,
-    fontSize: 10,
-  },
-
-  durationValue: {
-    color: CHARCOAL,
-    fontSize: 17,
-    fontWeight: '900',
-  },
-
-  attendanceNote: {
-    color: MUTED,
-    fontSize: 10,
-    textAlign: 'center',
-    lineHeight: 15,
-  },
-
   errorText: {
-    color: '#B42318',
+    color: RED,
     fontSize: 11,
     lineHeight: 17,
     textAlign: 'center',
@@ -1314,7 +1017,7 @@ const styles = StyleSheet.create({
   },
 
   infoTitle: {
-    color: DARK_RED,
+    color: RED,
     fontSize: 12,
     fontWeight: '900',
   },

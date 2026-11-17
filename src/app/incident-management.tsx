@@ -19,6 +19,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -50,6 +51,8 @@ type Incident = {
     toDate?: () => Date;
   } | null;
   status: string;
+  /** Corrective action written by a supervisor; shown to the reporter. */
+  supervisorNotes: string;
 };
 
 type FilterStatus = 'All' | 'Open' | 'In Review' | 'Closed';
@@ -201,6 +204,20 @@ export default function IncidentManagementScreen() {
   const [filter, setFilter] = useState<FilterStatus>('All');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  // Unsaved corrective-action text, per incident.
+  const [notesDrafts, setNotesDrafts] = useState<Record<string, string>>({});
+
+  function notesFor(incident: Incident) {
+    return notesDrafts[incident.id] ?? incident.supervisorNotes;
+  }
+
+  function clearDraft(id: string) {
+    setNotesDrafts((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+  }
 
   useEffect(() => {
     const user = auth.currentUser;
@@ -265,6 +282,7 @@ export default function IncidentManagementScreen() {
                 reportedBy: data.reportedBy ?? '',
                 reportedAt: data.reportedAt ?? null,
                 status: data.status ?? 'Open',
+                supervisorNotes: data.supervisorNotes ?? '',
               };
             });
 
@@ -357,6 +375,16 @@ export default function IncidentManagementScreen() {
       return;
     }
 
+    const notes = notesFor(incident).trim();
+
+    if (nextStatus === 'Resolved' && !notes) {
+      showMessage(
+        'Corrective action required',
+        'Describe the corrective action taken before marking this incident resolved.'
+      );
+      return;
+    }
+
     const confirmationMessage =
       nextStatus === 'Resolved'
         ? 'Confirm that the reported issue has been addressed.'
@@ -376,9 +404,14 @@ export default function IncidentManagementScreen() {
             status: nextStatus,
             statusUpdatedAt: serverTimestamp(),
             statusUpdatedBy: user.uid,
+            // Save the corrective action with the status when it was edited.
+            ...(notes !== incident.supervisorNotes.trim()
+              ? { supervisorNotes: notes }
+              : {}),
           }
         );
 
+        clearDraft(incident.id);
         setExpandedId(null);
       } catch (updateError) {
         console.error(
@@ -410,6 +443,27 @@ export default function IncidentManagementScreen() {
           onPress: () => void confirmUpdate(),
         },
       ]);
+    }
+  }
+
+  async function saveNotes(incident: Incident) {
+    if (updatingId) return;
+
+    setUpdatingId(incident.id);
+
+    try {
+      await updateDoc(doc(db, 'Incidents', incident.id), {
+        supervisorNotes: notesFor(incident).trim(),
+      });
+      clearDraft(incident.id);
+    } catch (updateError) {
+      console.error('Saving corrective action failed:', updateError);
+      showMessage(
+        'Save failed',
+        'The corrective action could not be saved. Check your connection and Firebase permissions.'
+      );
+    } finally {
+      setUpdatingId(null);
     }
   }
 
@@ -447,6 +501,8 @@ export default function IncidentManagementScreen() {
     const incidentIcon = getIncidentIcon(item);
     const nextAction = getNextAction(item.status);
     const isUpdating = updatingId === item.id;
+    const notes = notesFor(item);
+    const notesChanged = notes.trim() !== item.supervisorNotes.trim();
 
     const displayStatus =
       item.status === 'Under Review' ? 'In Review' : item.status;
@@ -548,6 +604,36 @@ export default function IncidentManagementScreen() {
             />
 
             <Detail label="CURRENT STATUS" value={displayStatus} />
+
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>CORRECTIVE ACTION</Text>
+              <TextInput
+                style={styles.notesInput}
+                value={notes}
+                onChangeText={(text) =>
+                  setNotesDrafts((current) => ({ ...current, [item.id]: text }))
+                }
+                placeholder="What was done to fix or prevent this? The reporter will see this."
+                placeholderTextColor={MUTED}
+                multiline
+                textAlignVertical="top"
+                editable={!updatingId}
+              />
+              {item.status === 'Under Review' && !notes.trim() && (
+                <Text style={styles.notesHint}>
+                  Required before marking resolved.
+                </Text>
+              )}
+              {notesChanged && (
+                <Pressable
+                  style={[styles.saveNotesButton, !!updatingId && styles.disabledButton]}
+                  disabled={!!updatingId}
+                  onPress={() => saveNotes(item)}
+                >
+                  <Text style={styles.saveNotesText}>Save corrective action</Text>
+                </Pressable>
+              )}
+            </View>
 
             {nextAction && (
               <Pressable
@@ -832,6 +918,41 @@ const styles = StyleSheet.create({
     color: DARK,
     fontSize: 12,
     lineHeight: 18,
+  },
+
+  notesInput: {
+    minHeight: 76,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 9,
+    backgroundColor: WHITE,
+    color: DARK,
+    fontSize: 12,
+    lineHeight: 18,
+    paddingHorizontal: 11,
+    paddingVertical: 9,
+  },
+
+  notesHint: {
+    color: AMBER,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+
+  saveNotesButton: {
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: RED,
+    borderRadius: 9,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginTop: 2,
+  },
+
+  saveNotesText: {
+    color: RED,
+    fontSize: 12,
+    fontWeight: '800',
   },
 
   updateButton: {

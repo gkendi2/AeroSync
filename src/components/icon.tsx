@@ -44,6 +44,16 @@ export const ICONS = {
   help: 'help-circle-outline',
   signOut: 'logout',
   model: 'chart-tree',
+
+  // Handler screens
+  checkIn: 'login',
+  checkOut: 'logout-variant',
+  clock: 'clock-outline',
+  checkCircle: 'check-circle',
+  location: 'map-marker-outline',
+  image: 'image-outline',
+  camera: 'camera-outline',
+  warning: 'alert-outline',
 } satisfies Record<string, IconName>;
 
 export type AppIconName = keyof typeof ICONS;

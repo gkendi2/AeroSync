@@ -24,6 +24,12 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import AeroSyncLogo from '@/components/aerosync-logo';
+import Icon, { type AppIconName } from '@/components/icon';
+import { AeroSyncColors } from '@/constants/theme';
+import { normalizeFlightNumber } from '@/features/baggage/validation';
+import { toDateString } from '@/features/datetime/format';
+import { assignedFlightsOn, type HandlerTask } from '@/features/handler/tasks';
 
 type ReportCategory = 'Incident' | 'Near Miss' | 'Hazard';
 type IncidentType = 'Baggage' | 'Aircraft' | 'Equipment' | 'Safety' | 'Other';
@@ -70,14 +76,14 @@ type Incident = {
 
 const ADMIN_UID = '1IN8y6QDe4WyqGhMXXG3OzRtSWE3';
 
-const RED = '#C8102E';
-const DARK = '#252525';
-const MUTED = '#777777';
-const BG = '#F5F5F6';
-const WHITE = '#FFFFFF';
-const BORDER = '#EAEAEA';
-const GREEN = '#16805C';
-const AMBER = '#A86B08';
+const RED = AeroSyncColors.primaryDark;
+const DARK = AeroSyncColors.text;
+const MUTED = AeroSyncColors.textSecondary;
+const BG = AeroSyncColors.background;
+const WHITE = AeroSyncColors.white;
+const BORDER = AeroSyncColors.border;
+const GREEN = AeroSyncColors.success;
+const AMBER = AeroSyncColors.warning;
 
 const REPORT_CATEGORIES: ReportCategory[] = [
   'Incident',
@@ -99,6 +105,16 @@ const SEVERITIES: Severity[] = [
   'High',
   'Critical',
 ];
+
+// Quick picks fill the existing free-text location field.
+const LOCATION_PRESETS = ['Ramp', 'Baggage hall', 'Gate', 'Aircraft hold'];
+
+const SEVERITY_DESCRIPTIONS: Record<Severity, string> = {
+  Low: 'No injury or damage; little or no delay.',
+  Medium: 'Minor damage or a short delay; needs follow-up.',
+  High: 'Damage, injury risk or a likely flight delay; tell your supervisor now.',
+  Critical: 'Injury or a serious safety risk; stop work and alert your supervisor immediately.',
+};
 
 const FILTERS: FilterStatus[] = [
   'All',
@@ -154,9 +170,9 @@ function getSeverityColors(severity: string) {
   switch (severity.toLowerCase()) {
     case 'critical':
     case 'high':
-      return { background: '#FCE8EB', text: RED };
+      return { background: AeroSyncColors.dangerLight, text: RED };
     case 'medium':
-      return { background: '#FFF2DA', text: AMBER };
+      return { background: AeroSyncColors.warningLight, text: AMBER };
     default:
       return { background: '#EEEEF0', text: DARK };
   }
@@ -164,17 +180,17 @@ function getSeverityColors(severity: string) {
 
 function getStatusColors(status: string) {
   if (status === 'Resolved' || status === 'Closed') {
-    return { background: '#E8F4ED', text: GREEN };
+    return { background: AeroSyncColors.successLight, text: GREEN };
   }
 
   if (
     status === 'Under Review' ||
     status === 'Under Investigation'
   ) {
-    return { background: '#FFF2DA', text: AMBER };
+    return { background: AeroSyncColors.warningLight, text: AMBER };
   }
 
-  return { background: '#FCE8EB', text: RED };
+  return { background: AeroSyncColors.dangerLight, text: RED };
 }
 
 function getDisplayStatus(status: string) {
@@ -193,21 +209,21 @@ function getIncidentIcon(incident: Incident) {
     incident.status === 'Resolved' ||
     incident.status === 'Closed'
   ) {
-    return { symbol: '✓', color: GREEN };
+    return { icon: 'check' as AppIconName, color: GREEN };
   }
 
   if (
     incident.severity === 'Critical' ||
     incident.severity === 'High'
   ) {
-    return { symbol: '⚠', color: RED };
+    return { icon: 'incidents' as AppIconName, color: RED };
   }
 
   if (incident.severity === 'Medium') {
-    return { symbol: '⚠', color: AMBER };
+    return { icon: 'incidents' as AppIconName, color: AMBER };
   }
 
-  return { symbol: '⚠', color: MUTED };
+  return { icon: 'incidents' as AppIconName, color: MUTED };
 }
 
 function getNextAction(status: string) {
@@ -267,6 +283,8 @@ export default function IncidentsScreen() {
   const [flightSearch, setFlightSearch] = useState('');
 
   const [location, setLocation] = useState('');
+  const [locationOther, setLocationOther] = useState(false);
+  const [myAssignedFlights, setMyAssignedFlights] = useState<string[]>([]);
   const [severity, setSeverity] = useState<Severity>('Low');
   const [description, setDescription] = useState('');
   const [immediateAction, setImmediateAction] = useState('');
@@ -434,6 +452,37 @@ export default function IncidentsScreen() {
     return unsubscribe;
   }, []);
 
+  // The user's own assignments, to list today's flights first in the picker.
+  useEffect(() => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    return onSnapshot(
+      query(
+        collection(db, 'CrewAssignments'),
+        where('handlerUid', '==', user.uid)
+      ),
+      (snapshot) => {
+        const tasks: HandlerTask[] = snapshot.docs.map((item) => {
+          const data = item.data();
+          return {
+            id: item.id,
+            flightNumber: data.flightNumber ?? '',
+            shiftDate: data.shiftDate ?? '',
+            shiftTime: data.shiftTime ?? '',
+            activity: data.activity ?? '',
+            status: data.status ?? 'Assigned',
+          };
+        });
+
+        setMyAssignedFlights(
+          assignedFlightsOn(tasks, toDateString(new Date()))
+        );
+      },
+      (error) => console.error('Could not load your assignments:', error)
+    );
+  }, []);
+
   async function submitIncident() {
     if (saving) return;
 
@@ -495,6 +544,7 @@ export default function IncidentsScreen() {
       setFlightSearch('');
       setFlightPickerOpen(false);
       setLocation('');
+      setLocationOther(false);
       setSeverity('Low');
       setDescription('');
       setImmediateAction('');
@@ -517,6 +567,14 @@ export default function IncidentsScreen() {
     nextStatus: 'Open' | 'Under Review' | 'Resolved' | 'Closed'
   ) {
     if (!isSupervisor || !auth.currentUser || updatingId) return;
+
+    if (nextStatus === 'Resolved' && !incident.supervisorNotes?.trim()) {
+      Alert.alert(
+        'Corrective action required',
+        'Add the corrective action in Incident Management before marking this incident resolved.'
+      );
+      return;
+    }
 
     setUpdatingId(incident.id);
 
@@ -591,6 +649,43 @@ export default function IncidentsScreen() {
       flight.destination,
     ].some((value) => value.toLowerCase().includes(search));
   });
+
+  const todayKey = toDateString(new Date());
+  const myFlightsToday = filteredFlights.filter(
+    (flight) =>
+      flight.departureDate.trim() === todayKey &&
+      myAssignedFlights.includes(normalizeFlightNumber(flight.flightNumber))
+  );
+  const otherFlights = filteredFlights.filter(
+    (flight) => !myFlightsToday.includes(flight)
+  );
+
+  function renderFlightOption(flight: Flight) {
+    return (
+      <Pressable
+        key={flight.id}
+        style={styles.flightOption}
+        onPress={() => {
+          setSelectedFlight(flight);
+          setFlightPickerOpen(false);
+          setFlightSearch('');
+        }}
+      >
+        <Text style={styles.flightOptionNumber}>
+          {flight.flightNumber}
+          {flight.isDemo ? ' · DEMO' : ''}
+        </Text>
+
+        <Text style={styles.flightOptionRoute}>
+          {flight.origin} → {flight.destination}
+        </Text>
+
+        <Text style={styles.flightOptionMeta}>
+          {flight.departureDate} · {flight.departureTime} · {flight.status}
+        </Text>
+      </Pressable>
+    );
+  }
 
   function renderOptions<T extends string>(
     options: T[],
@@ -669,14 +764,7 @@ export default function IncidentsScreen() {
               { borderColor: icon.color },
             ]}
           >
-            <Text
-              style={[
-                styles.incidentIconText,
-                { color: icon.color },
-              ]}
-            >
-              {icon.symbol}
-            </Text>
+            <Icon name={icon.icon} size={19} color={icon.color} />
           </View>
 
           <View style={styles.incidentInfo}>
@@ -706,9 +794,7 @@ export default function IncidentsScreen() {
             </Text>
           </View>
 
-          <Text style={styles.chevron}>
-            {expanded ? '⌄' : '›'}
-          </Text>
+          <Icon name={expanded ? 'expand' : 'forward'} size={22} color={DARK} />
         </Pressable>
 
         {expanded && (
@@ -768,12 +854,12 @@ export default function IncidentsScreen() {
               value={getDisplayStatus(item.status)}
             />
 
-            {!!item.supervisorNotes && (
-              <Detail
-                label="SUPERVISOR NOTES"
-                value={item.supervisorNotes}
-              />
-            )}
+            <Detail
+              label="CORRECTIVE ACTION"
+              value={
+                item.supervisorNotes?.trim() || 'Awaiting supervisor review'
+              }
+            />
 
             {isSupervisor && nextAction && (
               <Pressable
@@ -811,9 +897,7 @@ export default function IncidentsScreen() {
       >
         {/* Brand header */}
         <View style={styles.brandHeader}>
-          <View style={styles.brandMark}>
-            <Text style={styles.brandMarkText}>K</Text>
-          </View>
+          <AeroSyncLogo size={46} />
 
           <View>
             <Text style={styles.brandName}>AeroSync</Text>
@@ -895,9 +979,11 @@ export default function IncidentsScreen() {
               )}
             </View>
 
-            <Text style={styles.flightChevron}>
-              {flightPickerOpen ? '▲' : '▼'}
-            </Text>
+            <Icon
+              name={flightPickerOpen ? 'collapse' : 'expand'}
+              size={22}
+              color={RED}
+            />
           </Pressable>
 
           {selectedFlight && (
@@ -946,47 +1032,106 @@ export default function IncidentsScreen() {
                 </Text>
               ) : (
                 <View style={styles.flightOptionsList}>
-                  {filteredFlights.map((flight) => (
-                    <Pressable
-                      key={flight.id}
-                      style={styles.flightOption}
-                      onPress={() => {
-                        setSelectedFlight(flight);
-                        setFlightPickerOpen(false);
-                        setFlightSearch('');
-                      }}
-                    >
-                      <Text style={styles.flightOptionNumber}>
-                        {flight.flightNumber}
-                        {flight.isDemo ? ' · DEMO' : ''}
-                      </Text>
+                  {myFlightsToday.length > 0 && (
+                    <Text style={styles.flightGroupLabel}>
+                      YOUR FLIGHTS TODAY
+                    </Text>
+                  )}
+                  {myFlightsToday.map(renderFlightOption)}
 
-                      <Text style={styles.flightOptionRoute}>
-                        {flight.origin} → {flight.destination}
-                      </Text>
-
-                      <Text style={styles.flightOptionMeta}>
-                        {flight.departureDate} ·{' '}
-                        {flight.departureTime} · {flight.status}
-                      </Text>
-                    </Pressable>
-                  ))}
+                  {myFlightsToday.length > 0 && otherFlights.length > 0 && (
+                    <Text style={styles.flightGroupLabel}>ALL FLIGHTS</Text>
+                  )}
+                  {otherFlights.map(renderFlightOption)}
                 </View>
               )}
             </View>
           )}
 
           <Text style={styles.label}>Location *</Text>
+          <View style={[styles.optionRow, styles.locationChips]}>
+            {[...LOCATION_PRESETS, 'Other'].map((option) => {
+              const selected =
+                option === 'Other'
+                  ? locationOther
+                  : !locationOther && location === option;
+
+              return (
+                <Pressable
+                  key={option}
+                  style={[styles.option, selected && styles.optionSelected]}
+                  onPress={() => {
+                    if (option === 'Other') {
+                      setLocationOther(true);
+                      setLocation('');
+                    } else {
+                      setLocationOther(false);
+                      setLocation(option);
+                    }
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.optionText,
+                      selected && styles.optionTextSelected,
+                    ]}
+                  >
+                    {option}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
           <TextInput
             style={styles.input}
-            placeholder="e.g. Stand 12, Baggage Hall"
+            placeholder={
+              locationOther
+                ? 'Type the location, e.g. Stand 12'
+                : 'Pick above or type, e.g. Stand 12'
+            }
             placeholderTextColor="#999999"
             value={location}
             onChangeText={setLocation}
           />
 
           <Text style={styles.label}>Severity *</Text>
-          {renderOptions(SEVERITIES, severity, setSeverity)}
+          <View style={styles.severityList}>
+            {SEVERITIES.map((option) => {
+              const selected = severity === option;
+
+              return (
+                <Pressable
+                  key={option}
+                  style={[
+                    styles.severityOption,
+                    selected && styles.optionSelected,
+                  ]}
+                  onPress={() => setSeverity(option)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected }}
+                >
+                  <Icon
+                    name={selected ? 'radioOn' : 'radioOff'}
+                    size={20}
+                    color={selected ? RED : MUTED}
+                  />
+                  <View style={styles.severityCopy}>
+                    <Text
+                      style={[
+                        styles.optionText,
+                        selected && styles.optionTextSelected,
+                      ]}
+                    >
+                      {option}
+                    </Text>
+                    <Text style={styles.severityDescription}>
+                      {SEVERITY_DESCRIPTIONS[option]}
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
 
           <Text style={styles.label}>Description *</Text>
           <TextInput
@@ -1160,21 +1305,6 @@ const styles = StyleSheet.create({
     borderBottomColor: BORDER,
   },
 
-  brandMark: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: RED,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  brandMarkText: {
-    color: WHITE,
-    fontSize: 25,
-    fontWeight: '900',
-  },
-
   brandName: {
     color: DARK,
     fontSize: 21,
@@ -1217,7 +1347,7 @@ const styles = StyleSheet.create({
   },
 
   totalBadge: {
-    backgroundColor: '#FCEBED',
+    backgroundColor: AeroSyncColors.primaryLight,
     minWidth: 60,
     paddingVertical: 8,
     paddingHorizontal: 10,
@@ -1287,6 +1417,46 @@ const styles = StyleSheet.create({
     backgroundColor: WHITE,
   },
 
+  locationChips: {
+    marginBottom: 8,
+  },
+
+  severityList: {
+    gap: 7,
+  },
+
+  severityOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: WHITE,
+  },
+
+  severityCopy: {
+    flex: 1,
+    gap: 2,
+  },
+
+  severityDescription: {
+    color: MUTED,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+
+  flightGroupLabel: {
+    color: MUTED,
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+    paddingTop: 10,
+    paddingBottom: 2,
+  },
+
   optionSelected: {
     borderColor: RED,
     backgroundColor: '#FFF5F6',
@@ -1334,12 +1504,6 @@ const styles = StyleSheet.create({
   flightPlaceholder: {
     color: MUTED,
     fontSize: 13,
-  },
-
-  flightChevron: {
-    color: RED,
-    fontWeight: '900',
-    fontSize: 12,
   },
 
   selectedFlightNumber: {
@@ -1471,7 +1635,7 @@ const styles = StyleSheet.create({
 
   historyCount: {
     color: RED,
-    backgroundColor: '#FCEBED',
+    backgroundColor: AeroSyncColors.primaryLight,
     borderRadius: 18,
     minWidth: 34,
     textAlign: 'center',
@@ -1549,11 +1713,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  incidentIconText: {
-    fontSize: 19,
-    fontWeight: '900',
-  },
-
   incidentInfo: {
     flex: 1,
     minWidth: 0,
@@ -1583,12 +1742,6 @@ const styles = StyleSheet.create({
   severityText: {
     fontSize: 10,
     fontWeight: '900',
-  },
-
-  chevron: {
-    color: DARK,
-    fontSize: 24,
-    paddingLeft: 1,
   },
 
   details: {

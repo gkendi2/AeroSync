@@ -4,6 +4,7 @@ import { normalizeFlightNumber } from '@/features/baggage/validation';
 import {
   computeFlightInputs,
   FlightLiveInputs,
+  isUnresolvedIncidentStatus,
   NOT_SCORED_LABELS,
 } from '@/features/delay-risk/inputs';
 import {
@@ -141,11 +142,6 @@ type FlightAssessment = {
   unresolvedIncidents: Incident[];
 };
 
-const UNRESOLVED_INCIDENT_STATUSES = [
-  'Open',
-  'Under Investigation',
-];
-
 function localDateKey(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -225,12 +221,7 @@ function assessFlight(
       : normalizeFlightNumber(item.flightNumber) ===
         normalizeFlightNumber(flight.flightNumber);
 
-    return (
-      belongs &&
-      UNRESOLVED_INCIDENT_STATUSES.some(
-        (status) => status.toLowerCase() === item.status.toLowerCase(),
-      )
-    );
+    return belongs && isUnresolvedIncidentStatus(item.status);
   });
 
   return {
@@ -615,7 +606,7 @@ export default function DelayRiskScreen() {
       description: `${unresolvedReportCount} unresolved report(s) · R4 on ${r4Count} flight(s)`,
       flightCount: countWhere((item) => factorMatches('Incidents', item)),
       detail:
-        'Open and Under Investigation incident reports are counted per flight. Two or more within 120 minutes of departure trigger rule R4.',
+        'Every incident report for the flight that is not Resolved or Closed counts as unresolved (Open and Under Review both count). Two or more within 120 minutes of departure trigger rule R4.',
     },
   ];
 

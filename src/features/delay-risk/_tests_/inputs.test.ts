@@ -229,18 +229,27 @@ describe('staff_availability_pct', () => {
 });
 
 describe('unresolved_incidents', () => {
-  it('counts Open and Under Investigation incidents for the flight', () => {
+  it('counts every status except Resolved and Closed for the flight', () => {
     const result = compute({
       incidents: [
         incident('Open'),
+        incident('Under Review'),
         incident('Under Investigation'),
         incident('Resolved'),
+        incident('Closed'),
         incident('Open', { flightId: 'another-flight' }),
         incident('Open', { flightId: '', flightNumber: 'KQ-901' }),
         incident('Open', { flightId: '', flightNumber: 'KQ902' }),
       ],
     });
-    expect(result.unresolvedIncidents).toBe(3);
+    expect(result.unresolvedIncidents).toBe(4);
+  });
+
+  it('ignores case and surrounding spaces in the status', () => {
+    const result = compute({
+      incidents: [incident(' resolved '), incident('CLOSED'), incident('under review')],
+    });
+    expect(result.unresolvedIncidents).toBe(1);
   });
 });
 
