@@ -17,7 +17,7 @@ import {
 } from '@/features/delay-risk/model';
 import { useRouter } from 'expo-router';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -25,6 +25,7 @@ import {
   StyleSheet,
   Text,
   View,
+  type ScrollViewInstance,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -94,8 +95,39 @@ type Incident = {
   reportedAt: Date | null;
 };
 
-/** Which flights the list shows; 'At risk' = High and Medium (the default). */
-type RiskFilter = 'At risk' | RiskLevel | 'Not scored';
+type FactorId = 'Crew' | 'Baggage' | 'Incidents';
+
+/**
+ * Which flights the list shows: 'At risk' = High and Medium (the default),
+ * a legend item, or a risk-factor card.
+ */
+type RiskFilter = 'At risk' | RiskLevel | 'Not scored' | FactorId;
+
+/** Flights a risk-factor card counts (and lists when tapped). */
+function factorMatches(factor: FactorId, item: FlightAssessment) {
+  const rules = item.result?.triggeredRules ?? [];
+
+  if (factor === 'Crew') {
+    return rules.includes('R3') || item.live.notScored.includes('no-crew');
+  }
+
+  if (factor === 'Baggage') {
+    return (
+      rules.includes('R1') ||
+      rules.includes('R2') ||
+      item.live.notScored.includes('no-baggage')
+    );
+  }
+
+  return item.live.unresolvedIncidents > 0;
+}
+
+/** Green when no flight is affected, amber for one, red for two or more. */
+function factorColor(flightCount: number) {
+  if (flightCount === 0) return GREEN;
+  if (flightCount === 1) return ORANGE;
+  return RED;
+}
 
 type FlightAssessment = {
   flight: Flight;
@@ -230,7 +262,6 @@ export default function DelayRiskScreen({
   const [riskFilter, setRiskFilter] = useState<RiskFilter>('At risk');
   const [selectedPeriod, setSelectedPeriod] = useState<'Today' | 'All flights'>('Today');
   const [showPeriodOptions, setShowPeriodOptions] = useState(false);
-  const [expandedFactor, setExpandedFactor] = useState('');
 
   useEffect(() => {
     if (!auth.currentUser) {
@@ -474,28 +505,41 @@ export default function DelayRiskScreen({
         ? item.risk === 'High' || item.risk === 'Medium'
         : riskFilter === 'Not scored'
           ? item.risk === null
-          : item.risk === riskFilter,
+          : riskFilter === 'Crew' ||
+              riskFilter === 'Baggage' ||
+              riskFilter === 'Incidents'
+            ? factorMatches(riskFilter, item)
+            : item.risk === riskFilter,
     )
     .sort((a, b) => {
       if (a.risk === b.risk) return 0;
       return a.risk === 'High' ? -1 : 1;
     });
 
+  const isFactorFilter =
+    riskFilter === 'Crew' ||
+    riskFilter === 'Baggage' ||
+    riskFilter === 'Incidents';
+
   const listTitle =
     riskFilter === 'At risk'
       ? 'Flights at Risk'
       : riskFilter === 'Not scored'
         ? 'Not scored'
-        : `${riskFilter} risk`;
+        : isFactorFilter
+          ? `${riskFilter} factor`
+          : `${riskFilter} risk`;
 
   const emptyListText =
     riskFilter === 'At risk'
       ? 'No high- or medium-risk flights found for this period.'
       : riskFilter === 'Not scored'
         ? 'Every flight in this period has been scored.'
-        : `No ${riskFilter.toLowerCase()}-risk flights found for this period.`;
+        : isFactorFilter
+          ? `No flights affected by the ${riskFilter.toLowerCase()} factor in this period.`
+          : `No ${riskFilter.toLowerCase()}-risk flights found for this period.`;
 
-  // Tapping the selected legend item again returns to Flights at Risk.
+  // Tapping the selected legend item or card again returns to Flights at Risk.
   function toggleRiskFilter(filter: Exclude<RiskFilter, 'At risk'>) {
     setRiskFilter((current) => (current === filter ? 'At risk' : filter));
   }
@@ -511,69 +555,75 @@ export default function DelayRiskScreen({
     loadingIncidents ||
     loadingAttendance;
 
-  const noCrewCount = visibleAssessments.filter((item) =>
+  // Risk-factor counts over the visible flights. Rule counts can only come
+  // from scored flights; "no crew" / "no baggage" flights are the not-scored ones.
+  const countWhere = (test: (item: FlightAssessment) => boolean) =>
+    visibleAssessments.filter(test).length;
+
+  const hasRule = (item: FlightAssessment, rule: string) =>
+    item.result?.triggeredRules.includes(rule as never) ?? false;
+
+  const r3Count = countWhere((item) => hasRule(item, 'R3'));
+  const noCrewCount = countWhere((item) =>
     item.live.notScored.includes('no-crew'),
-  ).length;
+  );
 
-  const noBaggageCount = visibleAssessments.filter((item) =>
+  const r1r2Count = countWhere(
+    (item) => hasRule(item, 'R1') || hasRule(item, 'R2'),
+  );
+  const noBaggageCount = countWhere((item) =>
     item.live.notScored.includes('no-baggage'),
-  ).length;
+  );
 
-  const riskFactors = [
+  const r4Count = countWhere((item) => hasRule(item, 'R4'));
+  const unresolvedReportCount = visibleAssessments.reduce(
+    (sum, item) => sum + item.live.unresolvedIncidents,
+    0,
+  );
+
+  const riskFactors: {
+    id: FactorId;
+    icon: string;
+    description: string;
+    flightCount: number;
+    detail: string;
+  }[] = [
     {
-      id: 'weather',
-      title: 'Weather',
-      description: 'Weather data integration pending',
-      icon: '☁',
-      status: 'Not configured',
-      color: MUTED,
-      detail:
-        'Weather information will be connected here in a later development phase. No weather-based risk is currently included in the assessment.',
-    },
-    {
-      id: 'equipment',
-      title: 'Equipment',
-      description: 'Equipment availability data pending',
-      icon: '🔧',
-      status: 'Not configured',
-      color: MUTED,
-      detail:
-        'Ground support equipment status will be connected here later. Equipment availability is not currently included in the risk calculation.',
-    },
-    {
-      id: 'crew',
-      title: 'Crew',
-      description: `${noCrewCount} flight(s) with no crew assigned`,
+      id: 'Crew',
       icon: '♙',
-      status: 'Live data',
-      color: RED,
+      description: `R3 on ${r3Count} flight(s) · ${noCrewCount} with no crew assigned`,
+      flightCount: countWhere((item) => factorMatches('Crew', item)),
       detail:
         'Staff availability is the share of handlers assigned to the flight who are available: checked in today, shift not started yet, or all their assignments on the flight completed. Cancelled assignments are ignored.',
     },
     {
-      id: 'baggage',
-      title: 'Baggage',
-      description: `${noBaggageCount} flight(s) with no baggage registered`,
+      id: 'Baggage',
       icon: '▣',
-      status: 'Live data',
-      color: ORANGE,
+      description: `R1/R2 on ${r1r2Count} flight(s) · ${noBaggageCount} with no baggage registered`,
+      flightCount: countWhere((item) => factorMatches('Baggage', item)),
       detail:
         'Baggage progress is the share of the flight\'s bags with status Loading or Offloaded, counting bags registered in the 24 hours before scheduled departure.',
     },
     {
-      id: 'incidents',
-      title: 'Incidents',
-      description: `${visibleAssessments.reduce((sum, item) => sum + item.unresolvedIncidents.length, 0)} unresolved report(s)`,
+      id: 'Incidents',
       icon: '⚠',
-      status: 'Live data',
-      color: RED,
+      description: `${unresolvedReportCount} unresolved report(s) · R4 on ${r4Count} flight(s)`,
+      flightCount: countWhere((item) => factorMatches('Incidents', item)),
       detail:
         'Open and Under Investigation incident reports are counted per flight. Two or more within 120 minutes of departure trigger rule R4.',
     },
   ];
 
-  function toggleFactor(id: string) {
-    setExpandedFactor((current) => current === id ? '' : id);
+  // The cards sit below the flight list, so bring the list into view on tap.
+  const scrollRef = useRef<ScrollViewInstance>(null);
+  const listSectionY = useRef(0);
+
+  function selectFactor(id: FactorId) {
+    toggleRiskFilter(id);
+    scrollRef.current?.scrollTo({
+      y: Math.max(listSectionY.current - 8, 0),
+      animated: true,
+    });
   }
 
   function openFlight(item: FlightAssessment) {
@@ -583,6 +633,7 @@ export default function DelayRiskScreen({
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
@@ -851,7 +902,12 @@ export default function DelayRiskScreen({
                   </View>
                 </View>
 
-                <View style={styles.section}>
+                <View
+                  style={styles.section}
+                  onLayout={(event) => {
+                    listSectionY.current = event.nativeEvent.layout.y;
+                  }}
+                >
                   <View style={[styles.sectionHeadingRow, styles.listHeadingRow]}>
                     <Text style={styles.sectionTitle}>
                       {listTitle} ({listedFlights.length})
@@ -930,55 +986,59 @@ export default function DelayRiskScreen({
                 <View style={styles.section}>
                   <Text style={styles.sectionTitle}>Risk Factors</Text>
 
-                  {riskFactors.map((factor) => (
-                    <View key={factor.id}>
-                      <Pressable
-                        onPress={() => toggleFactor(factor.id)}
-                        style={({ pressed }) => [
-                          styles.factorRow,
-                          pressed && styles.pressed,
-                        ]}
-                      >
-                        <View style={styles.factorIcon}>
-                          <Text style={styles.factorIconText}>
-                            {factor.icon}
-                          </Text>
-                        </View>
+                  {riskFactors.map((factor) => {
+                    const active = riskFilter === factor.id;
+                    const color = factorColor(factor.flightCount);
 
-                        <View style={styles.factorCopy}>
-                          <Text style={styles.factorTitle}>
-                            {factor.title}
-                          </Text>
-                          <Text style={styles.factorDescription}>
-                            {factor.description}
-                          </Text>
-                        </View>
-
-                        {factor.status === 'Not configured' ? (
-                          <Text style={styles.pendingLabel}>Pending</Text>
-                        ) : (
-                          <View style={styles.liveDot} />
-                        )}
-
-                        <Text style={styles.rowChevron}>
-                          {expandedFactor === factor.id ? '⌄' : '›'}
-                        </Text>
-                      </Pressable>
-
-                      {expandedFactor === factor.id && (
-                        <View style={styles.factorDetail}>
-                          <Text style={styles.factorDetailText}>
-                            {factor.detail}
-                          </Text>
-                          {factor.status === 'Not configured' && (
-                            <Text style={styles.pendingNote}>
-                              Planned integration
+                    return (
+                      <View key={factor.id}>
+                        <Pressable
+                          onPress={() => selectFactor(factor.id)}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: active }}
+                          accessibilityLabel={`Show flights affected by the ${factor.id.toLowerCase()} factor`}
+                          style={({ pressed }) => [
+                            styles.factorRow,
+                            active && styles.factorRowActive,
+                            pressed && styles.pressed,
+                          ]}
+                        >
+                          <View style={styles.factorIcon}>
+                            <Text style={[styles.factorIconText, { color }]}>
+                              {factor.icon}
                             </Text>
-                          )}
-                        </View>
-                      )}
-                    </View>
-                  ))}
+                          </View>
+
+                          <View style={styles.factorCopy}>
+                            <Text style={styles.factorTitle}>{factor.id}</Text>
+                            <Text style={styles.factorDescription}>
+                              {factor.description}
+                            </Text>
+                          </View>
+
+                          <Text style={[styles.factorCount, { color }]}>
+                            {factor.flightCount}
+                          </Text>
+
+                          <View
+                            style={[styles.factorDot, { backgroundColor: color }]}
+                          />
+
+                          <Text style={styles.rowChevron}>
+                            {active ? '⌄' : '›'}
+                          </Text>
+                        </Pressable>
+
+                        {active && (
+                          <View style={styles.factorDetail}>
+                            <Text style={styles.factorDetailText}>
+                              {factor.detail}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })}
                 </View>
 
                 <View style={styles.disclaimer}>
@@ -1345,17 +1405,21 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 
-  pendingLabel: {
-    color: MUTED,
-    fontSize: 9,
-    fontWeight: '700',
+  factorRowActive: {
+    backgroundColor: '#F7F7F8',
   },
 
-  liveDot: {
-    width: 7,
-    height: 7,
+  factorCount: {
+    fontSize: 15,
+    fontWeight: '800',
+    minWidth: 18,
+    textAlign: 'right',
+  },
+
+  factorDot: {
+    width: 8,
+    height: 8,
     borderRadius: 4,
-    backgroundColor: GREEN,
   },
 
   factorDetail: {
@@ -1368,13 +1432,6 @@ const styles = StyleSheet.create({
     color: MUTED,
     fontSize: 11,
     lineHeight: 17,
-  },
-
-  pendingNote: {
-    color: RED,
-    fontSize: 10,
-    fontWeight: '700',
-    marginTop: 6,
   },
 
   disclaimer: {
