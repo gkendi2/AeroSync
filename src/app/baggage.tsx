@@ -19,6 +19,7 @@ import {
   View,
 } from 'react-native';
 
+import BaggageQrCard from '@/components/baggage-qr-card';
 import RegisterBaggageScreen from '@/components/register-baggage-screen';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -78,6 +79,8 @@ export default function BaggageScreen({ onBack }: BaggageScreenProps) {
 
   const [records, setRecords] = useState<BaggageRecord[]>([]);
   const [showRegisterForm, setShowRegisterForm] = useState(false);
+  // Document ID of the bag whose QR code is open, or '' for the list.
+  const [selectedRecordId, setSelectedRecordId] = useState('');
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] =
@@ -159,6 +162,69 @@ export default function BaggageScreen({ onBack }: BaggageScreenProps) {
       <RegisterBaggageScreen
         onBack={() => setShowRegisterForm(false)}
       />
+    );
+  }
+
+  // Looked up from the live listener, so the status updates while open.
+  const selectedRecord = records.find(
+    (record) => record.id === selectedRecordId
+  );
+
+  if (selectedRecord) {
+    const status = getStatusAppearance(selectedRecord.status);
+
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.screen}>
+          <View style={styles.header}>
+            <Pressable
+              onPress={() => setSelectedRecordId('')}
+              style={styles.backButton}
+              accessibilityLabel="Back to baggage"
+            >
+              <Text style={styles.backIcon}>‹</Text>
+            </Pressable>
+
+            <Text style={styles.heading}>Baggage QR</Text>
+          </View>
+
+          <ScrollView
+            style={styles.list}
+            contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.qrDetailMeta}>
+              <Text style={styles.flightReference} numberOfLines={1}>
+                {selectedRecord.flightId || 'Flight not assigned'}
+              </Text>
+
+              <View
+                style={[
+                  styles.statusBadge,
+                  { backgroundColor: status.background },
+                ]}
+              >
+                <Text style={[styles.statusText, { color: status.color }]}>
+                  {status.label}
+                </Text>
+              </View>
+            </View>
+
+            <BaggageQrCard
+              record={selectedRecord}
+              title={
+                selectedRecord.baggageReference ||
+                selectedRecord.baggageId ||
+                selectedRecord.id
+              }
+            />
+
+            <Pressable onPress={() => setSelectedRecordId('')}>
+              <Text style={styles.qrDetailBack}>‹ Back to baggage</Text>
+            </Pressable>
+          </ScrollView>
+        </View>
+      </SafeAreaView>
     );
   }
 
@@ -296,12 +362,18 @@ export default function BaggageScreen({ onBack }: BaggageScreenProps) {
                 const status = getStatusAppearance(record.status);
 
                 return (
-                  <View
+                  <Pressable
                     key={record.id}
-                    style={[
+                    onPress={() => setSelectedRecordId(record.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Show QR code for ${
+                      record.baggageId || record.id
+                    }`}
+                    style={({ pressed }) => [
                       styles.recordRow,
                       index === filteredRecords.length - 1 &&
                         styles.lastRecordRow,
+                      pressed && styles.recordRowPressed,
                     ]}
                   >
                     <View style={styles.bagIcon}>
@@ -344,7 +416,7 @@ export default function BaggageScreen({ onBack }: BaggageScreenProps) {
                     </View>
 
                     <Text style={styles.chevron}>›</Text>
-                  </View>
+                  </Pressable>
                 );
               })}
             </View>
@@ -369,6 +441,25 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: BACKGROUND,
+  },
+
+  /* QR DETAIL */
+  recordRowPressed: {
+    opacity: 0.6,
+  },
+  qrDetailMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 12,
+  },
+  qrDetailBack: {
+    color: RED,
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
+    paddingVertical: 10,
   },
   screen: {
     flex: 1,

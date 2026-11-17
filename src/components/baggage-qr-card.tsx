@@ -5,7 +5,14 @@ import {
 } from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library/legacy';
 import { useRef, useState } from 'react';
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+    Alert,
+    Platform,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 
 import { buildQrPayload } from '@/features/baggage/qr';
@@ -122,19 +129,24 @@ export default function BaggageQrCard({
 
       <Text style={styles.baggageId}>{displayId}</Text>
 
-      <Text style={styles.qrInstruction}>
-        Save this QR code to Photos for your handler demonstration.
-      </Text>
+      {/* Saving to Photos needs the native media library, so it is hidden on web. */}
+      {Platform.OS !== 'web' && (
+        <>
+          <Text style={styles.qrInstruction}>
+            Save this QR code to Photos for your handler demonstration.
+          </Text>
 
-      <TouchableOpacity
-        style={[styles.secondaryButton, savingQR && styles.disabledButton]}
-        onPress={saveQRToPhotos}
-        disabled={savingQR}
-      >
-        <Text style={styles.secondaryButtonText}>
-          {savingQR ? 'Saving QR...' : 'Save QR to Photos'}
-        </Text>
-      </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.secondaryButton, savingQR && styles.disabledButton]}
+            onPress={saveQRToPhotos}
+            disabled={savingQR}
+          >
+            <Text style={styles.secondaryButtonText}>
+              {savingQR ? 'Saving QR...' : 'Save QR to Photos'}
+            </Text>
+          </TouchableOpacity>
+        </>
+      )}
     </View>
   );
 }
