@@ -24,6 +24,7 @@ import { isAdminUser } from '@/lib/admin';
 import { useRouter } from 'expo-router';
 
 import HandlerDashboard from './handler-dashboard';
+import AeroSyncLogo from '@/components/aerosync-logo';
 
 type FlightSummary = {
   id: string;
@@ -189,7 +190,7 @@ export default function HomeScreen() {
   if (profileLoading) {
     return (
       <SafeAreaView style={styles.loadingScreen}>
-        <Text style={styles.loadingLogo}>K</Text>
+        <AeroSyncLogo size={44} />
         <ActivityIndicator size="large" color={RED} />
         <Text style={styles.loadingText}>Loading AeroSync...</Text>
       </SafeAreaView>
@@ -205,9 +206,7 @@ export default function HomeScreen() {
       <SafeAreaView style={styles.pendingScreen}>
         <ScrollView contentContainerStyle={styles.pendingContent}>
           <View style={styles.brandRow}>
-            <View style={styles.brandMark}>
-              <Text style={styles.brandMarkText}>K</Text>
-            </View>
+            <AeroSyncLogo size={40} />
             <View>
               <Text style={styles.brandName}>AeroSync</Text>
               <Text style={styles.brandSubtext}>
@@ -255,9 +254,7 @@ export default function HomeScreen() {
         {/* Application header */}
         <View style={styles.header}>
           <View style={styles.brandRow}>
-            <View style={styles.brandMarkSmall}>
-              <Text style={styles.brandMarkSmallText}>K</Text>
-            </View>
+            <AeroSyncLogo size={39} />
             <View>
               <Text style={styles.brandNameSmall}>AeroSync</Text>
               <Text style={styles.headerRole}>SUPERVISOR</Text>

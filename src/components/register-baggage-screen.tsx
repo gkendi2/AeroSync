@@ -25,6 +25,7 @@ import BaggageQrCard from '@/components/baggage-qr-card';
 import Icon from '@/components/icon';
 import { buildQrPayload } from '@/features/baggage/qr';
 import { validateFlightNumber } from '@/features/baggage/validation';
+import AeroSyncLogo from '@/components/aerosync-logo';
 
 export type RegisteredBaggage = {
   id: string;
@@ -166,9 +167,7 @@ export default function RegisterBaggageScreen({
               </Text>
             </View>
 
-            <View style={styles.headerMark}>
-              <Text style={styles.headerMarkText}>K</Text>
-            </View>
+            <AeroSyncLogo size={36} />
           </View>
 
           {isSuccessful ? (

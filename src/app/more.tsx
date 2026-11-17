@@ -12,6 +12,7 @@ import {
 import Icon, { type AppIconName } from '@/components/icon';
 import { isAdminUser } from '@/lib/admin';
 import { auth } from '@/lib/firebase';
+import AeroSyncLogo from '@/components/aerosync-logo';
 
 const RED = '#C8102E';
 const DARK = '#24272B';
@@ -73,9 +74,7 @@ export default function MoreScreen() {
             </Text>
           </View>
 
-          <View style={styles.brandMark}>
-            <Text style={styles.brandMarkText}>K</Text>
-          </View>
+          <AeroSyncLogo size={43} />
         </View>
 
         <Text style={styles.sectionTitle}>SUPERVISOR TOOLS</Text>
