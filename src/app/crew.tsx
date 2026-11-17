@@ -1,4 +1,5 @@
 import DateTimeField from '@/components/date-time-field';
+import Icon from '@/components/icon';
 import {
   formatShiftTime,
   parseDateString,
@@ -96,7 +97,8 @@ const MUTED = '#777D84';
 const BORDER = '#E8E9EB';
 const GREEN = '#2B914D';
 
-export default function CrewScreen({ onBack }: { onBack?: () => void }) {
+// A tab screen: no back button. The assignment form closes with Cancel.
+export default function CrewScreen() {
   const currentUser = auth.currentUser;
   const isAdmin = currentUser?.uid === ADMIN_UID;
 
@@ -600,23 +602,11 @@ export default function CrewScreen({ onBack }: { onBack?: () => void }) {
     );
   };
 
-  function handleBack() {
-    if (showAssignmentForm) {
-      resetForm();
-    } else {
-      onBack?.();
-    }
-  }
-
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.screen}>
         {/* HEADER */}
         <View style={styles.header}>
-          <Pressable onPress={handleBack} style={styles.backButton}>
-            <Text style={styles.backIcon}>‹</Text>
-          </Pressable>
-
           <Text style={styles.heading}>
             {showAssignmentForm ? 'Crew assignment' : 'Crew'}
           </Text>
@@ -627,7 +617,7 @@ export default function CrewScreen({ onBack }: { onBack?: () => void }) {
               style={styles.addButton}
               accessibilityLabel="Create crew assignment"
             >
-              <Text style={styles.addIcon}>＋</Text>
+              <Icon name="add" size={26} color={DARK} />
             </Pressable>
           ) : (
             <Pressable onPress={resetForm} style={styles.cancelHeaderButton}>
@@ -697,9 +687,7 @@ export default function CrewScreen({ onBack }: { onBack?: () => void }) {
                       </View>
                     )}
 
-                    <Text style={styles.pickerChevron}>
-                      {showHandlerPicker ? '⌃' : '⌄'}
-                    </Text>
+                    <Icon name={showHandlerPicker ? 'collapse' : 'expand'} size={22} color={MUTED} />
                   </Pressable>
 
                   {showHandlerPicker && (
@@ -761,9 +749,7 @@ export default function CrewScreen({ onBack }: { onBack?: () => void }) {
                                   </Text>
                                 </View>
 
-                                <Text style={styles.check}>
-                                  {selected ? '✓' : '○'}
-                                </Text>
+                                <Icon name={selected ? 'check' : 'unchecked'} size={20} color={selected ? RED : '#B8BBC0'} />
                               </Pressable>
                             );
                           })
@@ -795,9 +781,11 @@ export default function CrewScreen({ onBack }: { onBack?: () => void }) {
                       <Text style={styles.helperText}>Administrator</Text>
                     </View>
 
-                    <Text style={styles.check}>
-                      {selectedSupervisorUid === ADMIN_UID ? '✓' : '○'}
-                    </Text>
+                    <Icon
+                      name={selectedSupervisorUid === ADMIN_UID ? 'check' : 'unchecked'}
+                      size={20}
+                      color={selectedSupervisorUid === ADMIN_UID ? RED : '#B8BBC0'}
+                    />
                   </Pressable>
 
                   {supervisors.map((supervisor) => {
@@ -833,9 +821,7 @@ export default function CrewScreen({ onBack }: { onBack?: () => void }) {
                           </Text>
                         </View>
 
-                        <Text style={styles.check}>
-                          {selected ? '✓' : '○'}
-                        </Text>
+                        <Icon name={selected ? 'check' : 'unchecked'} size={20} color={selected ? RED : '#B8BBC0'} />
                       </Pressable>
                     );
                   })}
@@ -872,9 +858,7 @@ export default function CrewScreen({ onBack }: { onBack?: () => void }) {
                   </Text>
                 </View>
 
-                <Text style={styles.check}>
-                  {showFlightPicker ? '⌃' : '⌄'}
-                </Text>
+                <Icon name={showFlightPicker ? 'collapse' : 'expand'} size={22} color={MUTED} />
               </Pressable>
 
               {showFlightPicker && (
@@ -910,9 +894,7 @@ export default function CrewScreen({ onBack }: { onBack?: () => void }) {
                             </Text>
                           </View>
 
-                          <Text style={styles.check}>
-                            {selected ? '✓' : '○'}
-                          </Text>
+                          <Icon name={selected ? 'check' : 'unchecked'} size={20} color={selected ? RED : '#B8BBC0'} />
                         </Pressable>
                       );
                     })
@@ -969,13 +951,18 @@ export default function CrewScreen({ onBack }: { onBack?: () => void }) {
                     activity === item && styles.selectedOption,
                   ]}
                 >
+                  <Icon
+                    name={activity === item ? 'radioOn' : 'radioOff'}
+                    size={18}
+                    color={activity === item ? RED : '#B8BBC0'}
+                  />
                   <Text
                     style={[
                       styles.activityText,
                       activity === item && styles.selectedActivityText,
                     ]}
                   >
-                    {activity === item ? '●' : '○'} {item}
+                    {item}
                   </Text>
                 </Pressable>
               ))}
@@ -1140,7 +1127,7 @@ export default function CrewScreen({ onBack }: { onBack?: () => void }) {
 
             {/* SEARCH */}
             <View style={styles.searchBar}>
-              <Text style={styles.searchIcon}>⌕</Text>
+              <Icon name="search" size={19} color={MUTED} />
 
               <TextInput
                 value={search}
@@ -1152,8 +1139,11 @@ export default function CrewScreen({ onBack }: { onBack?: () => void }) {
               />
 
               {search.length > 0 && (
-                <Pressable onPress={() => setSearch('')}>
-                  <Text style={styles.clearSearch}>×</Text>
+                <Pressable
+                  onPress={() => setSearch('')}
+                  accessibilityLabel="Clear search"
+                >
+                  <Icon name="close" size={18} color={MUTED} />
                 </Pressable>
               )}
             </View>
@@ -1224,7 +1214,7 @@ export default function CrewScreen({ onBack }: { onBack?: () => void }) {
                         </Text>
                       </View>
 
-                      <Text style={styles.chevron}>›</Text>
+                      <Icon name="forward" size={22} color="#9299A0" />
                     </Pressable>
                   );
                 })
@@ -1673,6 +1663,9 @@ const styles = StyleSheet.create({
   } as any,
 
   activityOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     borderWidth: 1,
     borderColor: BORDER,
     borderRadius: 8,

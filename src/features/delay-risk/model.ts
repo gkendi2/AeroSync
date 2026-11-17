@@ -35,6 +35,10 @@ const NODES = new Map<number, TreeNode>(
 
 export const PROBABILITY_THRESHOLD: number = modelJson.threshold;
 
+/** Descriptive text from the model JSON, for display only. */
+export const MODEL_TRAINED_ON: string = modelJson.trained_on;
+export const MODEL_HYBRID_LOGIC: string = modelJson.hybrid_logic;
+
 /** Rule conditions as written in the model JSON's `rules` list (a test checks they still match). */
 export const RULES: { id: RuleId; text: string; test: (x: DelayRiskInputs) => boolean }[] = [
   {

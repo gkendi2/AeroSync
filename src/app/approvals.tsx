@@ -23,6 +23,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import Icon from '@/components/icon';
+import { goBackOrHome } from '@/lib/navigation';
+
 type Applicant = {
   uid: string;
   displayName?: string;
@@ -110,11 +113,7 @@ function getRoleName(role?: string) {
   return role || 'Role not specified';
 }
 
-export default function ApprovalsScreen({
-  onBack,
-}: {
-  onBack?: () => void;
-}) {
+export default function ApprovalsScreen() {
   const router = useRouter();
   const currentUser = auth.currentUser;
   const isAdmin = currentUser?.uid === ADMIN_UID;
@@ -129,11 +128,7 @@ export default function ApprovalsScreen({
   const [expandedUid, setExpandedUid] = useState<string | null>(null);
 
   function handleBack() {
-    if (onBack) {
-      onBack();
-    } else {
-      router.back();
-    }
+    goBackOrHome(router);
   }
 
   useEffect(() => {
@@ -370,7 +365,7 @@ export default function ApprovalsScreen({
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.accessDenied}>
           <Pressable onPress={handleBack} style={styles.backButton}>
-            <Text style={styles.backText}>‹</Text>
+            <Icon name="back" size={30} color={DARK} />
           </Pressable>
           <Text style={styles.emptyTitle}>Administrator access required</Text>
           <Text style={styles.mutedText}>
@@ -396,7 +391,7 @@ export default function ApprovalsScreen({
             style={styles.backButton}
             accessibilityLabel="Go back"
           >
-            <Text style={styles.backText}>‹</Text>
+            <Icon name="back" size={30} color={DARK} />
           </Pressable>
 
           <Text style={styles.heading}>Approvals</Text>
@@ -497,9 +492,7 @@ export default function ApprovalsScreen({
                         {formatRelativeDate(dateValue)}
                       </Text>
 
-                      <Text style={styles.chevron}>
-                        {expanded ? '⌄' : '›'}
-                      </Text>
+                      <Icon name={expanded ? 'expand' : 'forward'} size={22} color={MUTED} />
                     </Pressable>
 
                     {expanded && (

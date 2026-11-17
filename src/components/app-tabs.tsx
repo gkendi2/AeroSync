@@ -15,6 +15,8 @@ import {
   View,
 } from 'react-native';
 
+import Icon, { type AppIconName } from '@/components/icon';
+
 type Role = 'handler' | 'supervisor';
 
 type AppTabsProps = {
@@ -30,13 +32,14 @@ export default function AppTabs({ role }: AppTabsProps) {
   const styles = createStyles();
 
   return (
-    <Tabs>
+    // 'history': back returns to the screen you came from, not the first tab.
+    <Tabs options={{ backBehavior: 'history' }}>
       <TabSlot style={{ flex: 1 }} />
 
       <TabList asChild>
         <CustomTabList styles={styles}>
           <TabTrigger name="index" href="/" asChild>
-            <TabButton styles={styles} icon="⌂">
+            <TabButton styles={styles} icon="dashboard">
               {isHandler ? 'Home' : 'Operations'}
             </TabButton>
           </TabTrigger>
@@ -44,25 +47,25 @@ export default function AppTabs({ role }: AppTabsProps) {
           {isHandler ? (
             <>
               <TabTrigger name="explore" href="/explore" asChild>
-                <TabButton styles={styles} icon="▣">
+                <TabButton styles={styles} icon="tasks">
                   My Tasks
                 </TabButton>
               </TabTrigger>
 
               <TabTrigger name="scan-qr" href="/scan-qr" asChild>
-                <TabButton styles={styles} icon="▦">
+                <TabButton styles={styles} icon="scanQr">
                   Scan QR
                 </TabButton>
               </TabTrigger>
 
               <TabTrigger name="incidents" href="/incidents" asChild>
-                <TabButton styles={styles} icon="⚠">
+                <TabButton styles={styles} icon="incidents">
                   Incidents
                 </TabButton>
               </TabTrigger>
 
               <TabTrigger name="account" href="/account" asChild>
-                <TabButton styles={styles} icon="●">
+                <TabButton styles={styles} icon="account">
                   Account
                 </TabButton>
               </TabTrigger>
@@ -70,25 +73,25 @@ export default function AppTabs({ role }: AppTabsProps) {
           ) : (
             <>
               <TabTrigger name="flights" href="/flights" asChild>
-                <TabButton styles={styles} icon="✈">
+                <TabButton styles={styles} icon="flights">
                   Flights
                 </TabButton>
               </TabTrigger>
 
               <TabTrigger name="baggage" href="/baggage" asChild>
-                <TabButton styles={styles} icon="▣">
+                <TabButton styles={styles} icon="baggage">
                   Baggage
                 </TabButton>
               </TabTrigger>
 
               <TabTrigger name="crew" href="/crew" asChild>
-                <TabButton styles={styles} icon="👥">
+                <TabButton styles={styles} icon="crew">
                   Crew
                 </TabButton>
               </TabTrigger>
 
               <TabTrigger name="more" href="/more" asChild>
-                <TabButton styles={styles} icon="☰">
+                <TabButton styles={styles} icon="more">
                   More
                 </TabButton>
               </TabTrigger>
@@ -131,7 +134,7 @@ function TabButton({
   ...props
 }: TabTriggerSlotProps & {
   styles: TabStyles;
-  icon: string;
+  icon: AppIconName;
 }) {
   return (
     <Pressable
@@ -144,9 +147,7 @@ function TabButton({
         pressed && styles.pressed,
       ]}
     >
-      <Text style={[styles.tabIcon, isFocused && styles.activeTabIcon]}>
-        {icon}
-      </Text>
+      <Icon name={icon} size={23} color={isFocused ? RED : DARK} />
 
       <Text
         numberOfLines={1}
@@ -224,17 +225,6 @@ function createStyles() {
 
     activeTab: {
       backgroundColor: '#FCECEF',
-    },
-
-    tabIcon: {
-      color: DARK,
-      fontSize: 22,
-      lineHeight: 26,
-      fontWeight: '600',
-    },
-
-    activeTabIcon: {
-      color: RED,
     },
 
     tabText: {

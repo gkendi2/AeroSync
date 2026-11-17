@@ -23,6 +23,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import Icon, { type AppIconName } from '@/components/icon';
+import { goBackOrHome } from '@/lib/navigation';
+import { useRouter } from 'expo-router';
+
 type IncidentStatus =
   | 'Open'
   | 'Under Review'
@@ -130,21 +134,21 @@ function getIncidentIcon(incident: Incident) {
     incident.status === 'Resolved' ||
     incident.status === 'Closed'
   ) {
-    return { symbol: '✓', color: GREEN };
+    return { icon: 'check' as AppIconName, color: GREEN };
   }
 
   if (
     incident.severity === 'Critical' ||
     incident.severity === 'High'
   ) {
-    return { symbol: '⚠', color: RED };
+    return { icon: 'incidents' as AppIconName, color: RED };
   }
 
   if (incident.severity === 'Medium') {
-    return { symbol: '⚠', color: AMBER };
+    return { icon: 'incidents' as AppIconName, color: AMBER };
   }
 
-  return { symbol: '⚠', color: MUTED };
+  return { icon: 'incidents' as AppIconName, color: MUTED };
 }
 
 function getNextAction(status: string) {
@@ -189,11 +193,8 @@ function getDisplayTitle(incident: Incident) {
     : title;
 }
 
-export default function IncidentManagementScreen({
-  onBack,
-}: {
-  onBack: () => void;
-}) {
+export default function IncidentManagementScreen() {
+  const router = useRouter();
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -464,14 +465,7 @@ export default function IncidentManagementScreen({
               { borderColor: incidentIcon.color },
             ]}
           >
-            <Text
-              style={[
-                styles.incidentIconText,
-                { color: incidentIcon.color },
-              ]}
-            >
-              {incidentIcon.symbol}
-            </Text>
+            <Icon name={incidentIcon.icon} size={20} color={incidentIcon.color} />
           </View>
 
           <View style={styles.incidentInfo}>
@@ -500,9 +494,7 @@ export default function IncidentManagementScreen({
             </Text>
           </View>
 
-          <Text style={styles.chevron}>
-            {expanded ? '⌄' : '›'}
-          </Text>
+          <Icon name={expanded ? 'expand' : 'forward'} size={22} color={MUTED} />
         </Pressable>
 
         {expanded && (
@@ -589,11 +581,11 @@ export default function IncidentManagementScreen({
         {/* Header */}
         <View style={styles.header}>
           <Pressable
-            onPress={onBack}
+            onPress={() => goBackOrHome(router)}
             style={styles.backButton}
             accessibilityLabel="Go back"
           >
-            <Text style={styles.backText}>‹</Text>
+            <Icon name="back" size={30} color={DARK} />
           </Pressable>
 
           <Text style={styles.heading}>Incidents</Text>

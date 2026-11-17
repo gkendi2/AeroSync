@@ -15,6 +15,8 @@ import {
   RiskLevel,
   RULES,
 } from '@/features/delay-risk/model';
+import Icon, { type AppIconName } from '@/components/icon';
+import { goBackOrHome } from '@/lib/navigation';
 import { useRouter } from 'expo-router';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -162,6 +164,13 @@ function formatPercent(value: number | null) {
   return value === null ? '—' : `${Math.round(value)}%`;
 }
 
+/** HH:MM, 24-hour. */
+function formatClock(date: Date) {
+  return `${String(date.getHours()).padStart(2, '0')}:${String(
+    date.getMinutes(),
+  ).padStart(2, '0')}`;
+}
+
 function formatTimeRemaining(minutes: number | null) {
   if (minutes === null) return '—';
   if (minutes < 0) return 'Past scheduled departure';
@@ -234,11 +243,7 @@ function assessFlight(
   };
 }
 
-export default function DelayRiskScreen({
-  onBack,
-}: {
-  onBack?: () => void;
-}) {
+export default function DelayRiskScreen() {
   const router = useRouter();
 
   const [now, setNow] = useState(() => new Date());
@@ -583,14 +588,14 @@ export default function DelayRiskScreen({
 
   const riskFactors: {
     id: FactorId;
-    icon: string;
+    icon: AppIconName;
     description: string;
     flightCount: number;
     detail: string;
   }[] = [
     {
       id: 'Crew',
-      icon: '♙',
+      icon: 'crew',
       description: `R3 on ${r3Count} flight(s) · ${noCrewCount} with no crew assigned`,
       flightCount: countWhere((item) => factorMatches('Crew', item)),
       detail:
@@ -598,7 +603,7 @@ export default function DelayRiskScreen({
     },
     {
       id: 'Baggage',
-      icon: '▣',
+      icon: 'baggage',
       description: `R1/R2 on ${r1r2Count} flight(s) · ${noBaggageCount} with no baggage registered`,
       flightCount: countWhere((item) => factorMatches('Baggage', item)),
       detail:
@@ -606,7 +611,7 @@ export default function DelayRiskScreen({
     },
     {
       id: 'Incidents',
-      icon: '⚠',
+      icon: 'incidents',
       description: `${unresolvedReportCount} unresolved report(s) · R4 on ${r4Count} flight(s)`,
       flightCount: countWhere((item) => factorMatches('Incidents', item)),
       detail:
@@ -643,18 +648,23 @@ export default function DelayRiskScreen({
               onPress={() => {
                 if (selectedAssessment) {
                   setSelectedFlightId('');
-                } else if (onBack) {
-                  onBack();
                 } else {
-                  router.back();
+                  goBackOrHome(router);
                 }
               }}
               style={styles.backButton}
+              accessibilityLabel="Go back"
             >
-              <Text style={styles.backText}>‹</Text>
+              <Icon name="back" size={30} color={DARK} />
             </Pressable>
 
-            <Text style={styles.heading}>Delay Risk</Text>
+            <View>
+              <Text style={styles.heading}>Delay Risk</Text>
+              {/* The screen re-scores on its 30-second clock. */}
+              <Text style={styles.lastUpdated}>
+                Last updated {formatClock(now)}
+              </Text>
+            </View>
           </View>
 
           <View style={styles.periodWrapper}>
@@ -663,7 +673,7 @@ export default function DelayRiskScreen({
               onPress={() => setShowPeriodOptions((value) => !value)}
             >
               <Text style={styles.periodText}>{selectedPeriod}</Text>
-              <Text style={styles.periodChevron}>⌄</Text>
+              <Icon name="expand" size={18} color={MUTED} />
             </Pressable>
 
             {showPeriodOptions && (
@@ -713,7 +723,7 @@ export default function DelayRiskScreen({
                   onPress={() => setSelectedFlightId('')}
                   style={styles.detailBack}
                 >
-                  <Text style={styles.detailBackText}>‹ Back to overview</Text>
+                  <Text style={styles.detailBackText}>Back to overview</Text>
                 </Pressable>
 
                 <View style={styles.detailFlightHeader}>
@@ -781,9 +791,13 @@ export default function DelayRiskScreen({
                   <>
                     <Text style={styles.detailSectionTitle}>Not scored</Text>
                     {selectedAssessment.live.notScored.map((reason) => (
-                      <View key={reason} style={styles.warningBox}>
+                      <View
+                        key={reason}
+                        style={[styles.warningBox, styles.warningRow]}
+                      >
+                        <Icon name="incidents" size={18} color="#7A5200" />
                         <Text style={styles.warningText}>
-                          ⚠ {NOT_SCORED_LABELS[reason]}
+                          {NOT_SCORED_LABELS[reason]}
                         </Text>
                       </View>
                     ))}
@@ -937,7 +951,9 @@ export default function DelayRiskScreen({
                           pressed && styles.pressed,
                         ]}
                       >
-                        <Text style={styles.airlineIcon}>✈</Text>
+                        <View style={styles.airlineIcon}>
+                          <Icon name="airplane" size={22} color={RED} />
+                        </View>
 
                         <View style={styles.flightCopy}>
                           <Text style={styles.flightNumber}>
@@ -977,7 +993,7 @@ export default function DelayRiskScreen({
                           </Text>
                         </View>
 
-                        <Text style={styles.rowChevron}>›</Text>
+                        <Icon name="forward" size={22} color={MUTED} />
                       </Pressable>
                     ))
                   )}
@@ -1004,9 +1020,7 @@ export default function DelayRiskScreen({
                           ]}
                         >
                           <View style={styles.factorIcon}>
-                            <Text style={[styles.factorIconText, { color }]}>
-                              {factor.icon}
-                            </Text>
+                            <Icon name={factor.icon} size={23} color={color} />
                           </View>
 
                           <View style={styles.factorCopy}>
@@ -1024,9 +1038,7 @@ export default function DelayRiskScreen({
                             style={[styles.factorDot, { backgroundColor: color }]}
                           />
 
-                          <Text style={styles.rowChevron}>
-                            {active ? '⌄' : '›'}
-                          </Text>
+                          <Icon name={active ? 'expand' : 'forward'} size={22} color={MUTED} />
                         </Pressable>
 
                         {active && (
@@ -1125,6 +1137,12 @@ const styles = StyleSheet.create({
     color: DARK,
     fontSize: 12,
     fontWeight: '700',
+  },
+
+  lastUpdated: {
+    color: MUTED,
+    fontSize: 10,
+    marginTop: 2,
   },
 
   periodChevron: {
@@ -1299,9 +1317,7 @@ const styles = StyleSheet.create({
 
   airlineIcon: {
     width: 35,
-    color: RED,
-    fontSize: 23,
-    textAlign: 'center',
+    alignItems: 'center',
   },
 
   flightCopy: {
@@ -1574,6 +1590,12 @@ const styles = StyleSheet.create({
     padding: 11,
     backgroundColor: '#FFF4DC',
     borderRadius: 8,
+  },
+
+  warningRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
 
   warningText: {

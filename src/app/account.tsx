@@ -13,7 +13,16 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import Icon from '@/components/icon';
+import {
+  MODEL_HYBRID_LOGIC,
+  MODEL_TRAINED_ON,
+  PROBABILITY_THRESHOLD,
+  RULES,
+} from '@/features/delay-risk/model';
 import { auth, db } from '@/lib/firebase';
+import { goBackOrHome } from '@/lib/navigation';
+import { useRouter } from 'expo-router';
 
 const RED = '#F0182B';
 const DEEP_RED = '#B51F3A';
@@ -49,6 +58,7 @@ function showMessage(title: string, message: string) {
 }
 
 export default function AccountScreen() {
+  const router = useRouter();
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<UserRole>('');
@@ -161,6 +171,9 @@ export default function AccountScreen() {
 
   const initials = getInitials(displayName, email);
   const roleLabel = formatRole(role);
+  // Supervisors open Account from More (so it has a back button and the model
+  // section); for handlers it is a tab.
+  const isSupervisor = role === 'supervisor';
 
   if (loading) {
     return (
@@ -183,6 +196,16 @@ export default function AccountScreen() {
       >
         {/* PAGE HEADER */}
         <View style={styles.header}>
+          {isSupervisor && (
+            <Pressable
+              onPress={() => goBackOrHome(router)}
+              style={styles.backButton}
+              accessibilityLabel="Go back"
+            >
+              <Icon name="back" size={30} color="#292929" />
+            </Pressable>
+          )}
+
           <Text style={styles.eyebrow}>AEROSYNC</Text>
 
           <Text style={styles.title}>My Account</Text>
@@ -246,6 +269,27 @@ export default function AccountScreen() {
           </View>
         </View>
 
+        {/* SIGN OUT */}
+        <Pressable
+          style={({ pressed }) => [
+            styles.signOutButton,
+            pressed && styles.signOutPressed,
+            signingOut && styles.signOutDisabled,
+          ]}
+          onPress={handleSignOut}
+          disabled={signingOut}
+          accessibilityRole="button"
+        >
+          {signingOut ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <>
+              <Icon name="signOut" size={20} color="#FFFFFF" />
+              <Text style={styles.signOutText}>Sign out</Text>
+            </>
+          )}
+        </Pressable>
+
         {/* ACCOUNT INFORMATION */}
         <Text style={styles.sectionTitle}>
           Account information
@@ -254,7 +298,7 @@ export default function AccountScreen() {
         <View style={styles.infoCard}>
           <View style={styles.infoRow}>
             <View style={styles.iconBox}>
-              <Text style={styles.iconText}>@</Text>
+              <Icon name="email" size={20} color={DEEP_RED} />
             </View>
 
             <View style={styles.infoText}>
@@ -269,7 +313,7 @@ export default function AccountScreen() {
 
           <View style={styles.infoRow}>
             <View style={styles.iconBox}>
-              <Text style={styles.iconText}>ID</Text>
+              <Icon name="role" size={20} color={DEEP_RED} />
             </View>
 
             <View style={styles.infoText}>
@@ -282,7 +326,7 @@ export default function AccountScreen() {
 
           <View style={styles.infoRow}>
             <View style={styles.iconBox}>
-              <Text style={styles.iconText}>✓</Text>
+              <Icon name="access" size={20} color={DEEP_RED} />
             </View>
 
             <View style={styles.infoText}>
@@ -295,6 +339,45 @@ export default function AccountScreen() {
             </View>
           </View>
         </View>
+
+        {/* DELAY-RISK MODEL (supervisors only). Values come from
+            ml/models/aerosync_decision_tree.json via the model module. */}
+        {isSupervisor && (
+          <>
+            <Text style={styles.sectionTitle}>
+              About the delay-risk model
+            </Text>
+
+            <View style={[styles.infoCard, styles.modelCard]}>
+              <View style={styles.modelRow}>
+                <Icon name="model" size={20} color={DEEP_RED} />
+                <Text style={styles.modelText}>
+                  A decision tree trained on {MODEL_TRAINED_ON}. Results are
+                  provisional, not a validated flight-delay prediction.
+                </Text>
+              </View>
+
+              <Text style={styles.modelLabel}>PROBABILITY THRESHOLD</Text>
+              <Text style={styles.modelValue}>
+                {PROBABILITY_THRESHOLD.toFixed(2)}
+              </Text>
+
+              <Text style={styles.modelLabel}>RULES</Text>
+              {RULES.map((rule) => (
+                <Text key={rule.id} style={styles.modelText}>
+                  {rule.text}
+                </Text>
+              ))}
+
+              <Text style={styles.modelLabel}>RISK LEVELS</Text>
+              {MODEL_HYBRID_LOGIC.split(';').map((part) => (
+                <Text key={part} style={styles.modelText}>
+                  {part.trim()}
+                </Text>
+              ))}
+            </View>
+          </>
+        )}
 
         {/* AEROSYNC INFORMATION */}
         <Text style={styles.sectionTitle}>AeroSync</Text>
@@ -313,7 +396,7 @@ export default function AccountScreen() {
             }
           >
             <View style={styles.menuIcon}>
-              <Text style={styles.menuIconText}>i</Text>
+              <Icon name="info" size={20} color={DEEP_RED} />
             </View>
 
             <View style={styles.menuText}>
@@ -326,7 +409,7 @@ export default function AccountScreen() {
               </Text>
             </View>
 
-            <Text style={styles.chevron}>›</Text>
+            <Icon name="forward" size={24} color="#737373" />
           </Pressable>
 
           <View style={styles.infoDivider} />
@@ -344,7 +427,7 @@ export default function AccountScreen() {
             }
           >
             <View style={styles.menuIcon}>
-              <Text style={styles.menuIconText}>?</Text>
+              <Icon name="help" size={20} color={DEEP_RED} />
             </View>
 
             <View style={styles.menuText}>
@@ -357,28 +440,11 @@ export default function AccountScreen() {
               </Text>
             </View>
 
-            <Text style={styles.chevron}>›</Text>
+            <Icon name="forward" size={24} color="#737373" />
           </Pressable>
         </View>
 
-        {/* SIGN OUT */}
         <View style={styles.signOutSection}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.signOutButton,
-              pressed && styles.signOutPressed,
-              signingOut && styles.signOutDisabled,
-            ]}
-            onPress={handleSignOut}
-            disabled={signingOut}
-          >
-            {signingOut ? (
-              <ActivityIndicator color={DEEP_RED} />
-            ) : (
-              <Text style={styles.signOutText}>Sign out</Text>
-            )}
-          </Pressable>
-
           <Text style={styles.footer}>
             AeroSync · Kenya Airways Ground Operations
           </Text>
@@ -418,6 +484,46 @@ const styles = StyleSheet.create({
 
   header: {
     marginBottom: 20,
+  },
+
+  backButton: {
+    width: 36,
+    height: 36,
+    justifyContent: 'center',
+    marginLeft: -8,
+    marginBottom: 6,
+  },
+
+  modelCard: {
+    paddingVertical: 14,
+  },
+
+  modelRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+
+  modelLabel: {
+    marginTop: 14,
+    marginBottom: 4,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.1,
+    color: '#737373',
+  },
+
+  modelValue: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#292929',
+  },
+
+  modelText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#292929',
   },
 
   eyebrow: {
@@ -688,16 +794,17 @@ const styles = StyleSheet.create({
   signOutButton: {
     width: '100%',
     minHeight: 54,
+    marginTop: 16,
     borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#F0C7C4',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: DEEP_RED,
+    flexDirection: 'row',
+    gap: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   signOutPressed: {
-    backgroundColor: '#FDECEF',
+    opacity: 0.8,
   },
 
   signOutDisabled: {
@@ -705,7 +812,7 @@ const styles = StyleSheet.create({
   },
 
   signOutText: {
-    color: DEEP_RED,
+    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '800',
   },

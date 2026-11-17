@@ -1,6 +1,5 @@
 
 import { db } from '@/lib/firebase';
-import { useRouter } from 'expo-router';
 import {
   collection,
   onSnapshot,
@@ -20,6 +19,7 @@ import {
 } from 'react-native';
 
 import BaggageQrCard from '@/components/baggage-qr-card';
+import Icon from '@/components/icon';
 import RegisterBaggageScreen from '@/components/register-baggage-screen';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -33,10 +33,6 @@ type BaggageRecord = {
   qrPayload?: string;
   registeredBy?: string;
   createdAt?: unknown;
-};
-
-type BaggageScreenProps = {
-  onBack?: () => void;
 };
 
 type BaggageFilter = 'All' | 'Registered' | 'Loading' | 'Offloaded';
@@ -74,8 +70,8 @@ function getStatusAppearance(status?: string) {
   };
 }
 
-export default function BaggageScreen({ onBack }: BaggageScreenProps) {
-  const router = useRouter();
+// A tab screen: no back button on the list (its inner views have their own).
+export default function BaggageScreen() {
 
   const [records, setRecords] = useState<BaggageRecord[]>([]);
   const [showRegisterForm, setShowRegisterForm] = useState(false);
@@ -182,7 +178,7 @@ export default function BaggageScreen({ onBack }: BaggageScreenProps) {
               style={styles.backButton}
               accessibilityLabel="Back to baggage"
             >
-              <Text style={styles.backIcon}>‹</Text>
+              <Icon name="back" size={30} color={DARK} />
             </Pressable>
 
             <Text style={styles.heading}>Baggage QR</Text>
@@ -220,7 +216,7 @@ export default function BaggageScreen({ onBack }: BaggageScreenProps) {
             />
 
             <Pressable onPress={() => setSelectedRecordId('')}>
-              <Text style={styles.qrDetailBack}>‹ Back to baggage</Text>
+              <Text style={styles.qrDetailBack}>Back to baggage</Text>
             </Pressable>
           </ScrollView>
         </View>
@@ -235,41 +231,17 @@ export default function BaggageScreen({ onBack }: BaggageScreenProps) {
     'Offloaded',
   ];
 
-  function handleBack() {
-    if (onBack) {
-      onBack();
-    } else {
-      router.back();
-    }
-  }
-
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.screen}>
         {/* HEADER */}
         <View style={styles.header}>
-          <Pressable
-            onPress={handleBack}
-            style={styles.backButton}
-            accessibilityLabel="Go back"
-          >
-            <Text style={styles.backIcon}>‹</Text>
-          </Pressable>
-
           <Text style={styles.heading}>Baggage</Text>
-
-          <Pressable
-            onPress={() => router.push('/scan-qr' as any)}
-            style={styles.qrButton}
-            accessibilityLabel="Open QR scanner"
-          >
-            <Text style={styles.qrIcon}>▦</Text>
-          </Pressable>
         </View>
 
         {/* SEARCH */}
         <View style={styles.searchBar}>
-          <Text style={styles.searchIcon}>⌕</Text>
+          <Icon name="search" size={19} color={MUTED} />
 
           <TextInput
             value={search}
@@ -282,8 +254,11 @@ export default function BaggageScreen({ onBack }: BaggageScreenProps) {
           />
 
           {search.length > 0 && (
-            <Pressable onPress={() => setSearch('')}>
-              <Text style={styles.clearSearch}>×</Text>
+            <Pressable
+              onPress={() => setSearch('')}
+              accessibilityLabel="Clear search"
+            >
+              <Icon name="close" size={18} color={MUTED} />
             </Pressable>
           )}
         </View>
@@ -332,7 +307,7 @@ export default function BaggageScreen({ onBack }: BaggageScreenProps) {
           ) : filteredRecords.length === 0 ? (
             <View style={styles.emptyState}>
               <View style={styles.emptyIcon}>
-                <Text style={styles.emptyIconText}>▣</Text>
+                <Icon name="baggage" size={28} color={RED} />
               </View>
 
               <Text style={styles.emptyTitle}>
@@ -377,7 +352,7 @@ export default function BaggageScreen({ onBack }: BaggageScreenProps) {
                     ]}
                   >
                     <View style={styles.bagIcon}>
-                      <Text style={styles.bagIconText}>▣</Text>
+                      <Icon name="baggage" size={20} color={DARK} />
                     </View>
 
                     <View style={styles.recordInfo}>
@@ -415,7 +390,7 @@ export default function BaggageScreen({ onBack }: BaggageScreenProps) {
                       </Text>
                     </View>
 
-                    <Text style={styles.chevron}>›</Text>
+                    <Icon name="forward" size={22} color="#9299A0" />
                   </Pressable>
                 );
               })}
@@ -430,7 +405,8 @@ export default function BaggageScreen({ onBack }: BaggageScreenProps) {
           onPress={() => setShowRegisterForm(true)}
           style={styles.registerButton}
         >
-          <Text style={styles.registerButtonText}>＋ Register baggage</Text>
+          <Icon name="add" size={19} color={WHITE} />
+          <Text style={styles.registerButtonText}>Register baggage</Text>
         </Pressable>
       </View>
     </SafeAreaView>
@@ -699,6 +675,8 @@ const styles = StyleSheet.create({
   height: 45,
   backgroundColor: RED,
   borderRadius: 10,
+  flexDirection: 'row',
+  gap: 6,
   alignItems: 'center',
   justifyContent: 'center',
   marginTop: 10,

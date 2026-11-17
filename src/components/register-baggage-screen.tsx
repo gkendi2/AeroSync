@@ -22,6 +22,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import BaggageQrCard from '@/components/baggage-qr-card';
+import Icon from '@/components/icon';
 import { buildQrPayload } from '@/features/baggage/qr';
 import { validateFlightNumber } from '@/features/baggage/validation';
 
@@ -153,7 +154,7 @@ export default function RegisterBaggageScreen({
               disabled={registering}
               style={styles.backButton}
             >
-              <Text style={styles.backIcon}>‹</Text>
+              <Icon name="back" size={30} color={DARK} />
             </Pressable>
 
             <View style={styles.headerCopy}>
@@ -175,7 +176,7 @@ export default function RegisterBaggageScreen({
               {/* SUCCESS SUMMARY */}
               <View style={styles.successBanner}>
                 <View style={styles.successIcon}>
-                  <Text style={styles.successIconText}>✓</Text>
+                  <Icon name="check" size={22} color="#287448" />
                 </View>
 
                 <View style={styles.successCopy}>
@@ -237,7 +238,7 @@ export default function RegisterBaggageScreen({
                 {registered.map((record) => (
                   <View key={record.id} style={styles.generatedRow}>
                     <View style={styles.generatedIcon}>
-                      <Text style={styles.generatedIconText}>▣</Text>
+                      <Icon name="baggage" size={19} color={DARK} />
                     </View>
 
                     <View style={styles.generatedCopy}>
@@ -281,7 +282,7 @@ export default function RegisterBaggageScreen({
                 onPress={registerAnotherBatch}
               >
                 <Text style={styles.primaryButtonText}>
-                  ＋ Create another operation
+                  Create another operation
                 </Text>
               </Pressable>
 
@@ -290,7 +291,7 @@ export default function RegisterBaggageScreen({
                 onPress={onBack}
               >
                 <Text style={styles.secondaryButtonText}>
-                  Done · Back to baggage
+                  Done, back to baggage
                 </Text>
               </Pressable>
             </>
@@ -368,7 +369,7 @@ export default function RegisterBaggageScreen({
                 {/* PREVIEW */}
                 <View style={styles.previewBox}>
                   <View style={styles.previewIcon}>
-                    <Text style={styles.previewIconText}>▣</Text>
+                    <Icon name="baggage" size={21} color={RED} />
                   </View>
 
                   <View style={styles.previewCopy}>
@@ -399,7 +400,7 @@ export default function RegisterBaggageScreen({
                     </View>
                   ) : (
                     <Text style={styles.primaryButtonText}>
-                      Create baggage operation  →
+                      Create baggage operation
                     </Text>
                   )}
                 </Pressable>

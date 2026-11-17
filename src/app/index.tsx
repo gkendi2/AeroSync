@@ -19,22 +19,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import ApprovalsScreen from './approvals';
-import BaggageScreen from './baggage';
-import CrewScreen from './crew';
-import DelayRiskScreen from './delay-risk';
-import FlightsScreen from './flights';
-import HandlerDashboard from './handler-dashboard';
-import IncidentManagementScreen from './incident-management';
+import Icon from '@/components/icon';
+import { isAdminUser } from '@/lib/admin';
+import { useRouter } from 'expo-router';
 
-type DashboardScreen =
-  | 'dashboard'
-  | 'approvals'
-  | 'baggage'
-  | 'crew'
-  | 'delay-risk'
-  | 'flights'
-  | 'incident-management';
+import HandlerDashboard from './handler-dashboard';
 
 type FlightSummary = {
   id: string;
@@ -104,10 +93,13 @@ function getStatusStyle(status: string) {
 }
 
 export default function HomeScreen() {
+  // Screens open as routes (like the tab bar and More), so their back
+  // buttons return here through the router.
+  const router = useRouter();
+  const isAdmin = isAdminUser(auth.currentUser);
+
   const [role, setRole] = useState('');
   const [profileLoading, setProfileLoading] = useState(true);
-  const [screen, setScreen] =
-    useState<DashboardScreen>('dashboard');
 
   const [pendingCount, setPendingCount] = useState(0);
   const [baggageCount, setBaggageCount] = useState(0);
@@ -194,10 +186,6 @@ export default function HomeScreen() {
     };
   }, [role]);
 
-  function goBack() {
-    setScreen('dashboard');
-  }
-
   if (profileLoading) {
     return (
       <SafeAreaView style={styles.loadingScreen}>
@@ -206,17 +194,6 @@ export default function HomeScreen() {
         <Text style={styles.loadingText}>Loading AeroSync...</Text>
       </SafeAreaView>
     );
-  }
-
-  if (role === 'supervisor') {
-    if (screen === 'approvals') return <ApprovalsScreen onBack={goBack} />;
-    if (screen === 'baggage') return <BaggageScreen onBack={goBack} />;
-    if (screen === 'crew') return <CrewScreen onBack={goBack} />;
-    if (screen === 'delay-risk') return <DelayRiskScreen onBack={goBack} />;
-    if (screen === 'flights') return <FlightsScreen onBack={goBack} />;
-    if (screen === 'incident-management') {
-      return <IncidentManagementScreen onBack={goBack} />;
-    }
   }
 
   if (role === 'handler') {
@@ -286,15 +263,6 @@ export default function HomeScreen() {
               <Text style={styles.headerRole}>SUPERVISOR</Text>
             </View>
           </View>
-
-          <Pressable
-            style={styles.notificationButton}
-            onPress={() => setScreen('approvals')}
-            accessibilityLabel="Open staff approvals"
-          >
-            <Text style={styles.notificationIcon}>♧</Text>
-            {pendingCount > 0 && <View style={styles.notificationDot} />}
-          </Pressable>
         </View>
 
         {/* Main aviation image */}
@@ -319,7 +287,7 @@ export default function HomeScreen() {
         {/* Overlapping operations summary */}
         <Pressable
           style={styles.metricsPanel}
-          onPress={() => setScreen('crew')}
+          onPress={() => router.push('/crew')}
         >
           <View style={styles.metricsHeading}>
             <View>
@@ -330,13 +298,13 @@ export default function HomeScreen() {
                 Current operational records
               </Text>
             </View>
-            <Text style={styles.metricsArrow}>›</Text>
+            <Icon name="forward" size={22} color={MUTED} />
           </View>
 
           <View style={styles.metricsValues}>
             <Pressable
               style={styles.metric}
-              onPress={() => setScreen('crew')}
+              onPress={() => router.push('/crew')}
             >
               <Text style={styles.metricValue}>{crewCount}</Text>
               <Text style={styles.metricLabel}>Handlers</Text>
@@ -346,28 +314,33 @@ export default function HomeScreen() {
 
             <Pressable
               style={styles.metric}
-              onPress={() => setScreen('baggage')}
+              onPress={() => router.push('/baggage')}
             >
               <Text style={styles.metricValue}>{baggageCount}</Text>
               <Text style={styles.metricLabel}>Baggage</Text>
             </Pressable>
 
-            <View style={styles.metricDivider} />
+            {/* Only the admin approves registrations. */}
+            {isAdmin && (
+              <>
+                <View style={styles.metricDivider} />
 
-            <Pressable
-              style={styles.metric}
-              onPress={() => setScreen('approvals')}
-            >
-              <Text
-                style={[
-                  styles.metricValue,
-                  pendingCount > 0 && styles.metricAlert,
-                ]}
-              >
-                {pendingCount}
-              </Text>
-              <Text style={styles.metricLabel}>Pending</Text>
-            </Pressable>
+                <Pressable
+                  style={styles.metric}
+                  onPress={() => router.push('/approvals')}
+                >
+                  <Text
+                    style={[
+                      styles.metricValue,
+                      pendingCount > 0 && styles.metricAlert,
+                    ]}
+                  >
+                    {pendingCount}
+                  </Text>
+                  <Text style={styles.metricLabel}>Pending</Text>
+                </Pressable>
+              </>
+            )}
           </View>
         </Pressable>
 
@@ -381,10 +354,10 @@ export default function HomeScreen() {
           </View>
           <Pressable
             style={styles.viewAllButton}
-            onPress={() => setScreen('flights')}
+            onPress={() => router.push('/flights')}
           >
             <Text style={styles.viewAll}>View all</Text>
-            <Text style={styles.viewAllArrow}>›</Text>
+            <Icon name="forward" size={18} color={RED} />
           </Pressable>
         </View>
 
@@ -397,10 +370,10 @@ export default function HomeScreen() {
           ) : todayFlights.length === 0 ? (
             <Pressable
               style={styles.emptyState}
-              onPress={() => setScreen('flights')}
+              onPress={() => router.push('/flights')}
             >
               <View style={styles.emptyFlightIcon}>
-                <Text style={styles.emptyFlightIconText}>✈</Text>
+                <Icon name="airplane" size={21} color={RED} />
               </View>
               <View style={styles.emptyFlightCopy}>
                 <Text style={styles.emptyTitle}>
@@ -410,7 +383,7 @@ export default function HomeScreen() {
                   Your scheduled departures will appear here.
                 </Text>
               </View>
-              <Text style={styles.rowArrow}>›</Text>
+              <Icon name="forward" size={21} color="#9299A0" />
             </Pressable>
           ) : (
             todayFlights.slice(0, 4).map((flight, index) => {
@@ -425,7 +398,7 @@ export default function HomeScreen() {
                     index === Math.min(todayFlights.length, 4) - 1 &&
                       styles.lastFlightRow,
                   ]}
-                  onPress={() => setScreen('flights')}
+                  onPress={() => router.push('/flights')}
                 >
                   <View style={styles.flightMain}>
                     <Text style={styles.flightNumber}>
@@ -451,15 +424,15 @@ export default function HomeScreen() {
                     </Text>
                   </View>
 
-                  <Text style={styles.rowArrow}>›</Text>
+                  <Icon name="forward" size={21} color="#9299A0" />
                 </Pressable>
               );
             })
           )}
         </View>
 
-        {/* Action queue */}
-        {pendingCount > 0 && (
+        {/* Action queue: approvals are for the admin only. */}
+        {isAdmin && pendingCount > 0 && (
           <>
             <View style={styles.sectionHeading}>
               <View>
@@ -477,11 +450,11 @@ export default function HomeScreen() {
 
             <Pressable
               style={styles.attentionRow}
-              onPress={() => setScreen('approvals')}
+              onPress={() => router.push('/approvals')}
             >
               <View style={styles.attentionAccent} />
               <View style={styles.attentionIcon}>
-                <Text style={styles.attentionIconText}>!</Text>
+                <Icon name="approvals" size={19} color={RED} />
               </View>
 
               <View style={styles.attentionInfo}>
@@ -494,7 +467,7 @@ export default function HomeScreen() {
                 </Text>
               </View>
 
-              <Text style={styles.rowArrow}>›</Text>
+              <Icon name="forward" size={21} color="#9299A0" />
             </Pressable>
           </>
         )}

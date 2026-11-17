@@ -9,40 +9,54 @@ import {
     View,
 } from 'react-native';
 
+import Icon, { type AppIconName } from '@/components/icon';
+import { isAdminUser } from '@/lib/admin';
+import { auth } from '@/lib/firebase';
+
 const RED = '#C8102E';
 const DARK = '#24272B';
 const MUTED = '#747B83';
 const BORDER = '#E8E9EB';
 
-const menuItems = [
+const menuItems: {
+  title: string;
+  description: string;
+  icon: AppIconName;
+  route: '/delay-risk' | '/approvals' | '/incident-management' | '/account';
+  adminOnly?: boolean;
+}[] = [
   {
     title: 'Delay Risk',
     description: 'Monitor flight delay risks and operational indicators',
-    icon: '◷',
+    icon: 'delayRisk',
     route: '/delay-risk',
   },
   {
     title: 'Staff Approvals',
     description: 'Review and approve staff registration requests',
-    icon: '✓',
+    icon: 'approvals',
     route: '/approvals',
+    // Only the admin approves registrations.
+    adminOnly: true,
   },
   {
     title: 'Incident Management',
     description: 'Review and manage reported operational incidents',
-    icon: '⚠',
+    icon: 'incidents',
     route: '/incident-management',
   },
   {
     title: 'Account',
     description: 'Profile information, support and sign-out',
-    icon: '●',
+    icon: 'account',
     route: '/account',
   },
 ];
 
 export default function MoreScreen() {
   const router = useRouter();
+  const isAdmin = isAdminUser(auth.currentUser);
+  const visibleItems = menuItems.filter((item) => !item.adminOnly || isAdmin);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -67,13 +81,13 @@ export default function MoreScreen() {
         <Text style={styles.sectionTitle}>SUPERVISOR TOOLS</Text>
 
         <View style={styles.menuList}>
-          {menuItems.map((item, index) => (
+          {visibleItems.map((item, index) => (
             <Pressable
               key={item.route}
-              onPress={() => router.push(item.route as any)}
+              onPress={() => router.push(item.route)}
               style={({ pressed }) => [
                 styles.menuItem,
-                index === menuItems.length - 1 && styles.lastItem,
+                index === visibleItems.length - 1 && styles.lastItem,
                 pressed && styles.pressed,
               ]}
             >
@@ -84,15 +98,13 @@ export default function MoreScreen() {
                     styles.warningIcon,
                 ]}
               >
-                <Text
-                  style={[
-                    styles.menuIconText,
-                    item.title === 'Incident Management' &&
-                      styles.warningIconText,
-                  ]}
-                >
-                  {item.icon}
-                </Text>
+                <Icon
+                  name={item.icon}
+                  size={21}
+                  color={
+                    item.title === 'Incident Management' ? '#A86A13' : RED
+                  }
+                />
               </View>
 
               <View style={styles.menuCopy}>
@@ -102,7 +114,7 @@ export default function MoreScreen() {
                 </Text>
               </View>
 
-              <Text style={styles.chevron}>›</Text>
+              <Icon name="forward" size={22} color="#9299A0" />
             </Pressable>
           ))}
         </View>

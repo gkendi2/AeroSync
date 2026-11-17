@@ -1,5 +1,6 @@
 
 import DateTimeField from '@/components/date-time-field';
+import Icon from '@/components/icon';
 import { auth, db } from '@/lib/firebase';
 import {
   collection,
@@ -126,11 +127,8 @@ function isCompleted(status: string) {
   );
 }
 
-export default function FlightsScreen({
-  onBack,
-}: {
-  onBack: () => void;
-}) {
+// A tab screen: no back button.
+export default function FlightsScreen() {
   const [flights, setFlights] = useState<Flight[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -534,33 +532,25 @@ export default function FlightsScreen({
       <View style={styles.screen}>
         {/* Header */}
         <View style={styles.header}>
-          <Pressable onPress={onBack} style={styles.backButton}>
-            <Text style={styles.backIcon}>‹</Text>
-          </Pressable>
-
           <Text style={styles.heading}>Flights</Text>
 
           <View style={styles.headerActions}>
+            {/* One Filter button opens both the status and the date filter. */}
             <Pressable
               onPress={() => setShowFilters(!showFilters)}
               style={[
-                styles.headerIconButton,
-                showFilters && styles.headerIconActive,
+                styles.filterButton,
+                (showFilters || selectedStatus !== 'All' || showDateFilter) &&
+                  styles.headerIconActive,
               ]}
+              accessibilityRole="button"
               accessibilityLabel="Filter flights"
             >
-              <Text style={styles.headerIcon}>▽</Text>
-            </Pressable>
-
-            <Pressable
-              onPress={() => setShowDateFilter(!showDateFilter)}
-              style={[
-                styles.headerIconButton,
-                showDateFilter && styles.headerIconActive,
-              ]}
-              accessibilityLabel="Filter flights by date"
-            >
-              <Text style={styles.calendarIcon}>▣</Text>
+              <Icon name="filter" size={18} color={DARK} />
+              <Text style={styles.filterButtonText}>
+                Filter
+                {selectedStatus !== 'All' || showDateFilter ? ' •' : ''}
+              </Text>
             </Pressable>
 
             <Pressable
@@ -571,7 +561,7 @@ export default function FlightsScreen({
               style={styles.addButton}
               accessibilityLabel="Create a flight"
             >
-              <Text style={styles.addButtonText}>＋</Text>
+              <Icon name="add" size={20} color={WHITE} />
             </Pressable>
           </View>
         </View>
@@ -599,7 +589,7 @@ export default function FlightsScreen({
 
         {/* Search */}
         <View style={styles.searchBar}>
-          <Text style={styles.searchIcon}>⌕</Text>
+          <Icon name="search" size={19} color={MUTED} />
           <TextInput
             value={search}
             onChangeText={setSearch}
@@ -610,61 +600,85 @@ export default function FlightsScreen({
             returnKeyType="search"
           />
           {search.length > 0 && (
-            <Pressable onPress={() => setSearch('')}>
-              <Text style={styles.clearSearch}>×</Text>
+            <Pressable
+              onPress={() => setSearch('')}
+              accessibilityLabel="Clear search"
+            >
+              <Icon name="close" size={18} color={MUTED} />
             </Pressable>
           )}
         </View>
 
-        {/* Date filter */}
-        {showDateFilter && (
-          <View style={styles.filterPanel}>
-            <Text style={styles.filterPanelTitle}>Departure date</Text>
-            <TextInput
-              value={selectedDate}
-              onChangeText={setSelectedDate}
-              placeholder="YYYY-MM-DD"
-              style={styles.dateInput}
-            />
-            <Pressable
-              onPress={() => {
-                setSelectedDate(today);
-                setShowDateFilter(false);
-              }}
-            >
-              <Text style={styles.resetFilter}>Reset to today</Text>
-            </Pressable>
-          </View>
-        )}
-
-        {/* Status filters */}
+        {/* Filters: status and departure date, opened by the Filter button.
+            The date filter applies only while it is switched on, as before. */}
         {showFilters && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.filterScroll}
-            contentContainerStyle={styles.filterOptions}
-          >
-            {availableStatuses.map((status) => (
-              <Pressable
-                key={status}
-                onPress={() => setSelectedStatus(status)}
-                style={[
-                  styles.filterChip,
-                  selectedStatus === status && styles.filterChipActive,
-                ]}
-              >
-                <Text
+          <View style={styles.filterPanel}>
+            <Text style={styles.filterPanelTitle}>Status</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.filterScroll}
+              contentContainerStyle={styles.filterOptions}
+            >
+              {availableStatuses.map((status) => (
+                <Pressable
+                  key={status}
+                  onPress={() => setSelectedStatus(status)}
                   style={[
-                    styles.filterChipText,
-                    selectedStatus === status && styles.filterChipTextActive,
+                    styles.filterChip,
+                    selectedStatus === status && styles.filterChipActive,
                   ]}
                 >
-                  {status}
-                </Text>
-              </Pressable>
-            ))}
-          </ScrollView>
+                  <Text
+                    style={[
+                      styles.filterChipText,
+                      selectedStatus === status && styles.filterChipTextActive,
+                    ]}
+                  >
+                    {status}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+
+            <Text style={styles.filterPanelTitle}>Departure date</Text>
+            <Pressable
+              onPress={() => setShowDateFilter(!showDateFilter)}
+              style={[
+                styles.filterChip,
+                styles.dateToggle,
+                showDateFilter && styles.filterChipActive,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.filterChipText,
+                  showDateFilter && styles.filterChipTextActive,
+                ]}
+              >
+                {showDateFilter ? 'Filtering by date' : 'Filter by date'}
+              </Text>
+            </Pressable>
+
+            {showDateFilter && (
+              <>
+                <TextInput
+                  value={selectedDate}
+                  onChangeText={setSelectedDate}
+                  placeholder="YYYY-MM-DD"
+                  style={styles.dateInput}
+                />
+                <Pressable
+                  onPress={() => {
+                    setSelectedDate(today);
+                    setShowDateFilter(false);
+                  }}
+                >
+                  <Text style={styles.resetFilter}>Reset to today</Text>
+                </Pressable>
+              </>
+            )}
+          </View>
         )}
 
         {/* Flight list */}
@@ -678,8 +692,11 @@ export default function FlightsScreen({
             <View style={styles.formCard}>
               <View style={styles.formHeader}>
                 <Text style={styles.formTitle}>New flight</Text>
-                <Pressable onPress={() => setShowForm(false)}>
-                  <Text style={styles.closeForm}>×</Text>
+                <Pressable
+                  onPress={() => setShowForm(false)}
+                  accessibilityLabel="Close new flight form"
+                >
+                  <Icon name="close" size={22} color={MUTED} />
                 </Pressable>
               </View>
 
@@ -777,8 +794,11 @@ export default function FlightsScreen({
                 <Text style={styles.formTitle}>
                   Edit {editingFlight.flightNumber}
                 </Text>
-                <Pressable onPress={() => setEditingFlight(null)}>
-                  <Text style={styles.closeForm}>×</Text>
+                <Pressable
+                  onPress={() => setEditingFlight(null)}
+                  accessibilityLabel="Close edit form"
+                >
+                  <Icon name="close" size={22} color={MUTED} />
                 </Pressable>
               </View>
 
@@ -882,7 +902,7 @@ export default function FlightsScreen({
           ) : filteredFlights.length === 0 ? (
             <View style={styles.emptyState}>
               <View style={styles.emptyIconCircle}>
-                <Text style={styles.emptyPlane}>✈</Text>
+                <Icon name="airplane" size={28} color={RED} />
               </View>
               <Text style={styles.emptyTitle}>No flights found</Text>
               <Text style={styles.emptyText}>
@@ -896,7 +916,7 @@ export default function FlightsScreen({
               </Text>
               {!search && activeTab === 'Today' && (
                 <Pressable onPress={() => setShowForm(true)}>
-                  <Text style={styles.emptyAction}>＋ Add a flight</Text>
+                  <Text style={styles.emptyAction}>Add a flight</Text>
                 </Pressable>
               )}
             </View>
@@ -950,7 +970,7 @@ export default function FlightsScreen({
                       </Text>
                     </View>
 
-                    <Text style={styles.rowChevron}>›</Text>
+                    <Icon name="forward" size={22} color="#9299A0" />
                   </Pressable>
                 );
               })}
@@ -1019,6 +1039,25 @@ const styles = StyleSheet.create({
   },
   headerIconActive: {
     backgroundColor: '#F9E9EC',
+  },
+  filterButton: {
+    height: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 11,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 17,
+  },
+  filterButtonText: {
+    color: DARK,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  dateToggle: {
+    alignSelf: 'flex-start',
+    marginBottom: 10,
   },
   headerIcon: {
     color: DARK,
