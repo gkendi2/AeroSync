@@ -119,6 +119,11 @@ export default function AppTabs({ role }: AppTabsProps) {
                 <Pressable style={styles.hiddenTab} />
               </TabTrigger>
 
+              {/* Admin two-factor set-up (the screen checks the admin itself). */}
+              <TabTrigger name="admin-security" href="/admin-security" asChild>
+                <Pressable style={styles.hiddenTab} />
+              </TabTrigger>
+
               <TabTrigger
                 name="incident-management"
                 href="/incident-management"

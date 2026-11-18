@@ -5,8 +5,17 @@ import {
   signInWithGoogle,
 } from '@/lib/google-sign-in';
 import {
+  cleanTotpCode,
+  isCompleteTotpCode,
+  mfaCodeError,
+} from '@/features/auth/mfa';
+import {
   createUserWithEmailAndPassword,
   deleteUser,
+  getMultiFactorResolver,
+  type MultiFactorError,
+  type MultiFactorResolver,
+  TotpMultiFactorGenerator,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
@@ -44,6 +53,11 @@ export default function AuthScreen() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [resettingPassword, setResettingPassword] = useState(false);
+  // Set when sign-in needs the authenticator code (admin only).
+  const [mfaResolver, setMfaResolver] = useState<MultiFactorResolver | null>(null);
+  const [mfaCode, setMfaCode] = useState('');
+  const [mfaError, setMfaError] = useState('');
+  const [verifyingCode, setVerifyingCode] = useState(false);
 
   function showMessage(title: string, message: string) {
     if (Platform.OS === 'web') {
@@ -188,6 +202,11 @@ export default function AuthScreen() {
           : 'Your handler registration request has been submitted. A supervisor must approve your account before you can access operational records.'
       );
     } catch (error: any) {
+      if (error?.code === 'auth/multi-factor-auth-required') {
+        startMfa(error);
+        return;
+      }
+
       console.error('Authentication failed:', error);
 
       const messages: Record<string, string> = {
@@ -228,6 +247,12 @@ export default function AuthScreen() {
       credential = await signInWithGoogle();
     } catch (error: any) {
       const code = error?.code ?? '';
+
+      if (code === 'auth/multi-factor-auth-required') {
+        startMfa(error);
+        setLoading(false);
+        return;
+      }
 
       if (
         code === 'auth/popup-closed-by-user' ||
@@ -333,6 +358,62 @@ export default function AuthScreen() {
     }
   }
 
+  // Second step for an account with an authenticator app (only the admin).
+  async function verifyMfaCode() {
+    if (!mfaResolver || verifyingCode || !isCompleteTotpCode(mfaCode)) return;
+
+    const hint = mfaResolver.hints.find(
+      (item) => item.factorId === TotpMultiFactorGenerator.FACTOR_ID
+    );
+
+    if (!hint) {
+      setMfaResolver(null);
+      showMessage(
+        'Two-factor sign-in',
+        'This account uses a second factor that AeroSync does not support.'
+      );
+      return;
+    }
+
+    setVerifyingCode(true);
+    setMfaError('');
+
+    try {
+      await mfaResolver.resolveSignIn(
+        TotpMultiFactorGenerator.assertionForSignIn(
+          hint.uid,
+          cleanTotpCode(mfaCode)
+        )
+      );
+      // Signed in: the root layout takes over from here.
+    } catch (error: any) {
+      const result = mfaCodeError(error?.code);
+      setMfaCode('');
+
+      if (result.restart) {
+        setMfaResolver(null);
+        showMessage('Sign in again', result.message);
+      } else {
+        setMfaError(result.message);
+      }
+    } finally {
+      setVerifyingCode(false);
+    }
+  }
+
+  function cancelMfa() {
+    setMfaResolver(null);
+    setMfaCode('');
+    setMfaError('');
+    setPassword('');
+  }
+
+  function startMfa(error: unknown) {
+    setMfaResolver(getMultiFactorResolver(auth, error as MultiFactorError));
+    setMfaCode('');
+    setMfaError('');
+  }
+
   function toggleMode() {
     setIsRegistering((previous) => !previous);
     setDisplayName('');
@@ -340,6 +421,86 @@ export default function AuthScreen() {
     setConfirmPassword('');
     setShowPassword(false);
     setShowConfirmPassword(false);
+  }
+
+  if (mfaResolver) {
+    return (
+      <KeyboardAvoidingView
+        style={styles.screen}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <ImageBackground
+          source={require('../../assets/images/Kenya Airways at Golden Hour.png')}
+          style={styles.backgroundImage}
+          resizeMode="cover"
+        >
+          <View style={styles.backgroundOverlay}>
+            <ScrollView
+              contentContainerStyle={styles.scrollContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              <View style={styles.card}>
+                <View style={styles.headingSection}>
+                  <Text style={styles.eyebrow}>TWO-FACTOR SIGN-IN</Text>
+                  <Text style={styles.heading}>Enter your code</Text>
+                  <Text style={styles.headingSubtitle}>
+                    Open your authenticator app and enter the 6-digit code
+                    for AeroSync.
+                  </Text>
+                </View>
+
+                <View style={styles.fieldGroup}>
+                  <Text style={styles.fieldLabel}>6-digit code</Text>
+                  <TextInput
+                    style={[styles.input, styles.codeInput]}
+                    value={mfaCode}
+                    onChangeText={(value) => setMfaCode(cleanTotpCode(value))}
+                    placeholder="123456"
+                    placeholderTextColor="#858585"
+                    keyboardType="number-pad"
+                    maxLength={6}
+                    autoFocus
+                    autoComplete="one-time-code"
+                    textContentType="oneTimeCode"
+                    editable={!verifyingCode}
+                    returnKeyType="done"
+                    onSubmitEditing={verifyMfaCode}
+                  />
+                  {!!mfaError && <Text style={styles.codeError}>{mfaError}</Text>}
+                </View>
+
+                <Pressable
+                  style={[
+                    styles.primaryButton,
+                    (verifyingCode || !isCompleteTotpCode(mfaCode)) &&
+                      styles.disabled,
+                  ]}
+                  onPress={verifyMfaCode}
+                  disabled={verifyingCode || !isCompleteTotpCode(mfaCode)}
+                  accessibilityRole="button"
+                >
+                  {verifyingCode ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.primaryButtonText}>Verify</Text>
+                  )}
+                </Pressable>
+
+                <Pressable
+                  onPress={cancelMfa}
+                  disabled={verifyingCode}
+                  style={styles.switchButton}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.switchText}>Cancel</Text>
+                </Pressable>
+              </View>
+            </ScrollView>
+          </View>
+        </ImageBackground>
+      </KeyboardAvoidingView>
+    );
   }
 
   return (
@@ -693,6 +854,18 @@ export default function AuthScreen() {
 }
 
 const styles = StyleSheet.create({
+  codeInput: {
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: 6,
+    textAlign: 'center',
+  },
+  codeError: {
+    color: '#C8102E',
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 8,
+  },
   dividerRow: {
     flexDirection: 'row',
     alignItems: 'center',

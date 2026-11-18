@@ -26,6 +26,7 @@ import { useRouter } from 'expo-router';
 import HandlerDashboard from './handler-dashboard';
 import AeroSyncLogo from '@/components/aerosync-logo';
 import NotificationBell from '@/components/notification-bell';
+import { shouldPromptEnrolment, useAdminMfa } from '@/features/auth/useAdminMfa';
 
 type FlightSummary = {
   id: string;
@@ -98,6 +99,15 @@ export default function HomeScreen() {
   // Screens open as routes (like the tab bar and More), so their back
   // buttons return here through the router.
   const router = useRouter();
+
+  // Admin without two-factor: open the set-up screen once per sign-in
+  // (it has a "Not now" button; Approvals stay locked).
+  const { status: mfaStatus } = useAdminMfa();
+
+  useEffect(() => {
+    if (shouldPromptEnrolment(mfaStatus)) router.push('/admin-security');
+  }, [mfaStatus, router]);
+
   const isAdmin = isAdminUser(auth.currentUser);
 
   const [role, setRole] = useState('');

@@ -24,6 +24,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import Icon from '@/components/icon';
+import { approvalsUnlocked, useAdminMfa } from '@/features/auth/useAdminMfa';
 import { goBackOrHome } from '@/lib/navigation';
 
 type Applicant = {
@@ -117,6 +118,8 @@ export default function ApprovalsScreen() {
   const router = useRouter();
   const currentUser = auth.currentUser;
   const isAdmin = currentUser?.uid === ADMIN_UID;
+  // Approvals need two-factor: enrolled and this session signed in with the code.
+  const { status: mfaStatus } = useAdminMfa();
 
   const [activeTab, setActiveTab] = useState<ApprovalTab>('pending');
   const [pending, setPending] = useState<Applicant[]>([]);
@@ -376,6 +379,38 @@ export default function ApprovalsScreen() {
     );
   }
 
+  if (!approvalsUnlocked(mfaStatus)) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.accessDenied}>
+          <Pressable onPress={handleBack} style={styles.backButton}>
+            <Icon name="back" size={30} color={DARK} />
+          </Pressable>
+          {mfaStatus.loading ? (
+            <ActivityIndicator color={RED} />
+          ) : (
+            <>
+              <Icon name="access" size={34} color={RED} />
+              <Text style={styles.emptyTitle}>Two-factor sign-in required</Text>
+              <Text style={styles.mutedText}>
+                {mfaStatus.enrolled
+                  ? 'Sign out and sign in again with the code from your authenticator app to manage registrations.'
+                  : 'Set up an authenticator app for the administrator account before managing registrations.'}
+              </Text>
+              <Pressable
+                onPress={() => router.push('/admin-security')}
+                style={styles.mfaButton}
+                accessibilityRole="button"
+              >
+                <Text style={styles.mfaButtonText}>Two-factor authentication</Text>
+              </Pressable>
+            </>
+          )}
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   const tabs: { key: ApprovalTab; label: string; count: number }[] = [
     { key: 'pending', label: 'Pending', count: pending.length },
     { key: 'approved', label: 'Approved', count: approved.length },
@@ -567,6 +602,22 @@ export default function ApprovalsScreen() {
 }
 
 const styles = StyleSheet.create({
+  mfaButton: {
+    minHeight: 46,
+    borderRadius: 12,
+    backgroundColor: RED,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+    marginTop: 8,
+  },
+
+  mfaButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+
   safeArea: {
     flex: 1,
     backgroundColor: BG,

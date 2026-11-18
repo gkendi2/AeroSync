@@ -20,6 +20,7 @@ import {
   PROBABILITY_THRESHOLD,
   RULES,
 } from '@/features/delay-risk/model';
+import { useAdminMfa } from '@/features/auth/useAdminMfa';
 import { rebuildMessageAccess } from '@/features/messages/service';
 import { isAdminUser } from '@/lib/admin';
 import { auth, db } from '@/lib/firebase';
@@ -67,6 +68,7 @@ export default function AccountScreen() {
   const [loading, setLoading] = useState(true);
   const [signingOut, setSigningOut] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
+  const { status: mfaStatus } = useAdminMfa();
 
   useEffect(() => {
     const user = auth.currentUser;
@@ -402,6 +404,39 @@ export default function AccountScreen() {
                   {part.trim()}
                 </Text>
               ))}
+            </View>
+          </>
+        )}
+
+        {/* TWO-FACTOR AUTHENTICATION (admin only) */}
+        {mfaStatus.isAdmin && (
+          <>
+            <Text style={styles.sectionTitle}>Security</Text>
+
+            <View style={styles.menuCard}>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.menuRow,
+                  pressed && styles.menuRowPressed,
+                ]}
+                onPress={() => router.push('/admin-security')}
+                accessibilityRole="button"
+              >
+                <View style={styles.iconBox}>
+                  <Icon name="access" size={20} color={DEEP_RED} />
+                </View>
+                <View style={styles.infoText}>
+                  <Text style={styles.infoLabel}>Two-factor authentication</Text>
+                  <Text style={styles.infoValue}>
+                    {mfaStatus.loading
+                      ? 'Checking…'
+                      : mfaStatus.enrolled
+                        ? 'On · authenticator app'
+                        : 'Off · required for Staff Approvals'}
+                  </Text>
+                </View>
+                <Icon name="forward" size={22} color="#9299A0" />
+              </Pressable>
             </View>
           </>
         )}
