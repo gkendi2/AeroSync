@@ -17,6 +17,12 @@ service cloud.firestore {
         && request.auth.uid == '1IN8y6QDe4WyqGhMXXG3OzRtSWE3';
     }
 
+    // The admin's current sign-in used the authenticator-app code (TOTP).
+    // A missing claim (no second factor) evaluates to false.
+    function signedInWithAuthenticatorCode() {
+      return request.auth.token.firebase.sign_in_second_factor == 'totp';
+    }
+
     function userProfileExists() {
       return signedIn()
         && exists(
@@ -113,6 +119,7 @@ service cloud.firestore {
 
       // ONLY GLORIA CAN APPROVE HANDLER APPLICATIONS.
       allow update: if isAdmin()
+        && signedInWithAuthenticatorCode()
         && resource.data.role == 'pending'
         && resource.data.requestedRole == 'handler'
         && request.resource.data.role == 'handler'
@@ -128,6 +135,7 @@ service cloud.firestore {
 
       // ONLY GLORIA CAN APPROVE SUPERVISOR APPLICATIONS.
       allow update: if isAdmin()
+        && signedInWithAuthenticatorCode()
         && resource.data.role == 'pending'
         && resource.data.requestedRole == 'supervisor'
         && request.resource.data.role == 'supervisor'
@@ -143,6 +151,7 @@ service cloud.firestore {
 
       // ONLY GLORIA CAN REJECT PENDING APPLICATIONS.
       allow update: if isAdmin()
+        && signedInWithAuthenticatorCode()
         && resource.data.role == 'pending'
         && request.resource.data.role == 'rejected'
         && request.resource.data.diff(resource.data)
