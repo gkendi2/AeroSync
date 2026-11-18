@@ -7,15 +7,16 @@ import {
   splitShiftTime,
   toDateString,
 } from '@/features/datetime/format';
+import {
+  createAssignmentWithAccess,
+  updateAssignmentWithAccess,
+} from '@/features/messages/service';
 import { auth, db } from '@/lib/firebase';
 import {
-  addDoc,
   collection,
-  doc,
   onSnapshot,
   query,
   serverTimestamp,
-  updateDoc,
   where,
 } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
@@ -497,15 +498,19 @@ export default function CrewScreen() {
         activity,
       };
 
+      // Thread membership is written in the same transaction.
       if (editingAssignment) {
-        await updateDoc(
-          doc(db, 'CrewAssignments', editingAssignment.id),
+        await updateAssignmentWithAccess(
+          editingAssignment.id,
+          editingAssignment,
           {
             ...assignmentData,
             ...(isAdmin ? { supervisorUid } : {}),
             updatedBy: currentUser.uid,
             updatedAt: serverTimestamp(),
-          }
+          },
+          flightsData,
+          currentUser.uid
         );
 
         Alert.alert(
@@ -513,13 +518,17 @@ export default function CrewScreen() {
           'The assignment has been updated successfully.'
         );
       } else {
-        await addDoc(collection(db, 'CrewAssignments'), {
-          ...assignmentData,
-          status: 'Assigned',
-          assignedBy: currentUser.uid,
-          createdAt: serverTimestamp(),
-          supervisorUid,
-        });
+        await createAssignmentWithAccess(
+          {
+            ...assignmentData,
+            status: 'Assigned',
+            assignedBy: currentUser.uid,
+            createdAt: serverTimestamp(),
+            supervisorUid,
+          },
+          flightsData,
+          currentUser.uid
+        );
 
         Alert.alert(
           'Assignment created',
@@ -545,13 +554,17 @@ export default function CrewScreen() {
 
     const performCancellation = async () => {
       try {
-        await updateDoc(
-          doc(db, 'CrewAssignments', assignment.id),
+        // Removes the handler's thread membership in the same transaction.
+        await updateAssignmentWithAccess(
+          assignment.id,
+          assignment,
           {
             status: 'Cancelled',
             updatedBy: currentUser.uid,
             updatedAt: serverTimestamp(),
-          }
+          },
+          flightsData,
+          currentUser.uid
         );
 
         Alert.alert(

@@ -2,6 +2,8 @@
 import DateTimeField from '@/components/date-time-field';
 import Icon from '@/components/icon';
 import { auth, db } from '@/lib/firebase';
+import { openFlightThread } from '@/lib/navigation';
+import { useRouter } from 'expo-router';
 import {
   collection,
   doc,
@@ -143,6 +145,7 @@ export default function FlightsScreen() {
   const [showForm, setShowForm] = useState(false);
 
   // Edit form: the flight being edited (null when closed) and its draft values.
+  const router = useRouter();
   const [editingFlight, setEditingFlight] = useState<Flight | null>(null);
   const [editDepartureDate, setEditDepartureDate] = useState('');
   const [editDepartureTime, setEditDepartureTime] = useState('');
@@ -878,6 +881,14 @@ export default function FlightsScreen() {
                   <Text style={styles.saveButtonText}>Save changes</Text>
                 )}
               </Pressable>
+
+              <Pressable
+                onPress={() => openFlightThread(router, editingFlight.id)}
+                style={styles.messagesButton}
+              >
+                <Icon name="messages" size={18} color={RED} />
+                <Text style={styles.messagesButtonText}>Open messages</Text>
+              </Pressable>
             </View>
           )}
 
@@ -970,6 +981,16 @@ export default function FlightsScreen() {
                       </Text>
                     </View>
 
+                    <Pressable
+                      onPress={() => openFlightThread(router, flight.id)}
+                      hitSlop={8}
+                      style={styles.messagesIconButton}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Messages for ${flight.flightNumber}`}
+                    >
+                      <Icon name="messages" size={20} color={RED} />
+                    </Pressable>
+
                     <Icon name="forward" size={22} color="#9299A0" />
                   </Pressable>
                 );
@@ -987,6 +1008,33 @@ export default function FlightsScreen() {
 const WHITE = '#FFFFFF';
 
 const styles = StyleSheet.create({
+  messagesIconButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#FDE9EC',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  messagesButton: {
+    minHeight: 44,
+    flexDirection: 'row',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: RED,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 10,
+  },
+
+  messagesButtonText: {
+    color: RED,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+
   safeArea: {
     flex: 1,
     backgroundColor: BACKGROUND,

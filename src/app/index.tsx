@@ -25,6 +25,7 @@ import { useRouter } from 'expo-router';
 
 import HandlerDashboard from './handler-dashboard';
 import AeroSyncLogo from '@/components/aerosync-logo';
+import NotificationBell from '@/components/notification-bell';
 
 type FlightSummary = {
   id: string;
@@ -260,6 +261,8 @@ export default function HomeScreen() {
               <Text style={styles.headerRole}>SUPERVISOR</Text>
             </View>
           </View>
+
+          <NotificationBell />
         </View>
 
         {/* Main aviation image */}

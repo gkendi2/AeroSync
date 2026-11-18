@@ -406,7 +406,11 @@ export default function IncidentManagementScreen() {
             statusUpdatedBy: user.uid,
             // Save the corrective action with the status when it was edited.
             ...(notes !== incident.supervisorNotes.trim()
-              ? { supervisorNotes: notes }
+              ? {
+                  supervisorNotes: notes,
+                  supervisorNotesUpdatedAt: serverTimestamp(),
+                  supervisorNotesUpdatedBy: user.uid,
+                }
               : {}),
           }
         );
@@ -454,6 +458,9 @@ export default function IncidentManagementScreen() {
     try {
       await updateDoc(doc(db, 'Incidents', incident.id), {
         supervisorNotes: notesFor(incident).trim(),
+        // When the corrective action changed (for the reporter's notifications).
+        supervisorNotesUpdatedAt: serverTimestamp(),
+        supervisorNotesUpdatedBy: auth.currentUser?.uid ?? '',
       });
       clearDraft(incident.id);
     } catch (updateError) {

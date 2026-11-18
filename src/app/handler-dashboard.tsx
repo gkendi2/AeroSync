@@ -24,6 +24,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import AeroSyncLogo from '@/components/aerosync-logo';
+import NotificationBell from '@/components/notification-bell';
 import FlightStrip from '@/components/flight-strip';
 import Icon from '@/components/icon';
 import StatusBadge, { taskStatusTone } from '@/components/status-badge';
@@ -40,6 +41,7 @@ import {
 } from '@/features/handler/tasks';
 import { advanceTask } from '@/features/handler/taskService';
 import { confirmAction } from '@/lib/confirm';
+import { openFlightThread } from '@/lib/navigation';
 
 type Assignment = {
   id: string;
@@ -403,6 +405,8 @@ export default function HandlerDashboard() {
             <Text style={styles.brandName}>AeroSync</Text>
             <Text style={styles.brandSubtitle}>HANDLER</Text>
           </View>
+
+          <NotificationBell />
         </View>
 
         {/* Greeting */}
@@ -592,6 +596,20 @@ export default function HandlerDashboard() {
                 </Text>
               )}
             </Pressable>
+
+            {nextFlight && (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => openFlightThread(router, nextFlight.id)}
+                style={({ pressed }) => [
+                  styles.messagesButton,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Icon name="messages" size={16} color={RED} />
+                <Text style={styles.messagesButtonText}>Messages</Text>
+              </Pressable>
+            )}
           </Pressable>
         ) : (
           <View style={styles.emptyCard}>
@@ -842,6 +860,24 @@ const styles = StyleSheet.create({
     color: MUTED,
     fontSize: 12,
     fontWeight: '700',
+  },
+
+  messagesButton: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: RED,
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+
+  messagesButtonText: {
+    color: RED,
+    fontSize: 12,
+    fontWeight: '800',
   },
 
   blockedText: {

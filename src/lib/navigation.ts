@@ -7,6 +7,11 @@ type Router = ReturnType<typeof useRouter>;
  * returns to the previous screen (the tab navigator keeps screen history),
  * or to the dashboard when there is nothing to go back to.
  */
+/** Opens a flight's message thread (Flights document ID). */
+export function openFlightThread(router: Router, flightId: string) {
+  router.push({ pathname: '/flight-thread', params: { flightId } });
+}
+
 export function goBackOrHome(router: Router) {
   if (router.canGoBack()) {
     router.back();

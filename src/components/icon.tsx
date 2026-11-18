@@ -54,6 +54,12 @@ export const ICONS = {
   image: 'image-outline',
   camera: 'camera-outline',
   warning: 'alert-outline',
+
+  // Messages and notifications
+  messages: 'message-text-outline',
+  send: 'send',
+  bell: 'bell-outline',
+  newTask: 'clipboard-plus-outline',
 } satisfies Record<string, IconName>;
 
 export type AppIconName = keyof typeof ICONS;

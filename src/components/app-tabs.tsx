@@ -7,6 +7,7 @@ import {
   TabTrigger,
   TabTriggerSlotProps,
 } from 'expo-router/ui';
+import { usePathname } from 'expo-router';
 
 import {
   Pressable,
@@ -26,6 +27,10 @@ type AppTabsProps = {
 const RED = '#C8102E';
 const DARK = '#24272B';
 const BORDER = '#E9E9EB';
+
+// Screens shown full screen: the floating tab bar is hidden there
+// (each has its own back button).
+const FULL_SCREEN_ROUTES = ['/flight-thread'];
 
 export default function AppTabs({ role }: AppTabsProps) {
   const isHandler = role === 'handler';
@@ -68,6 +73,15 @@ export default function AppTabs({ role }: AppTabsProps) {
                 <TabButton styles={styles} icon="account">
                   Account
                 </TabButton>
+              </TabTrigger>
+
+              {/* Hidden destinations shared by both roles */}
+              <TabTrigger name="flight-thread" href="/flight-thread" asChild>
+                <Pressable style={styles.hiddenTab} />
+              </TabTrigger>
+
+              <TabTrigger name="notifications" href="/notifications" asChild>
+                <Pressable style={styles.hiddenTab} />
               </TabTrigger>
             </>
           ) : (
@@ -114,6 +128,15 @@ export default function AppTabs({ role }: AppTabsProps) {
               </TabTrigger>
 
               <TabTrigger name="account" href="/account" asChild>
+                <Pressable style={styles.hiddenTab} />
+              </TabTrigger>
+
+              {/* Hidden destinations shared by both roles */}
+              <TabTrigger name="flight-thread" href="/flight-thread" asChild>
+                <Pressable style={styles.hiddenTab} />
+              </TabTrigger>
+
+              <TabTrigger name="notifications" href="/notifications" asChild>
                 <Pressable style={styles.hiddenTab} />
               </TabTrigger>
             </>
@@ -168,8 +191,14 @@ function CustomTabList({
 }: TabListProps & {
   styles: TabStyles;
 }) {
+  // Hidden, not removed: the triggers must stay mounted for navigation.
+  const fullScreen = FULL_SCREEN_ROUTES.includes(usePathname());
+
   return (
-    <View {...props} style={styles.tabListContainer}>
+    <View
+      {...props}
+      style={[styles.tabListContainer, fullScreen && styles.hiddenTab]}
+    >
       <View style={styles.tabList}>
         {props.children}
       </View>

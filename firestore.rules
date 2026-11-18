@@ -634,5 +634,128 @@ service cloud.firestore {
       // Attendance records cannot be deleted.
       allow delete: if false;
     }
+
+    // --------------------------------------------------
+    // FLIGHT MESSAGES
+    // --------------------------------------------------
+    // One thread per Flights document. A handler can use a thread only
+    // while their member document exists. Supervisors write member
+    // documents in the same transaction as the crew assignment change
+    // (create, cancel, change of flight or handler). Each lists the
+    // handler's non-cancelled assignment IDs for that flight and is
+    // deleted when none are left.
+
+    match /FlightMessages/{flightId} {
+
+      function isThreadMember() {
+        return isHandler()
+          && exists(
+            /databases/$(database)/documents/FlightMessages/$(flightId)/members/$(request.auth.uid)
+          );
+      }
+
+      match /members/{uid} {
+
+        allow get: if isSupervisor()
+          || (signedIn() && request.auth.uid == uid);
+
+        allow create, update: if isSupervisor()
+          && isApprovedHandlerUid(uid)
+          && exists(/databases/$(database)/documents/Flights/$(flightId))
+          && request.resource.data.keys().hasAll([
+            'handlerUid',
+            'assignmentIds',
+            'updatedBy',
+            'updatedAt'
+          ])
+          && request.resource.data.keys().hasOnly([
+            'handlerUid',
+            'assignmentIds',
+            'updatedBy',
+            'updatedAt'
+          ])
+          && request.resource.data.handlerUid == uid
+          && request.resource.data.assignmentIds is list
+          && request.resource.data.assignmentIds.size() > 0
+          && request.resource.data.updatedBy == request.auth.uid
+          && request.resource.data.updatedAt == request.time;
+
+        // Removed when the handler has no non-cancelled assignment left.
+        allow delete: if isSupervisor();
+
+        // Supervisors list members through the collection-group rule below.
+        allow list: if false;
+      }
+
+      match /messages/{messageId} {
+
+        allow read: if isSupervisor() || isThreadMember();
+
+        allow create: if (isSupervisor() || isThreadMember())
+          && request.resource.data.keys().hasAll([
+            'flightId',
+            'flightNumber',
+            'senderUid',
+            'senderName',
+            'senderRole',
+            'text',
+            'createdAt'
+          ])
+          && request.resource.data.keys().hasOnly([
+            'flightId',
+            'flightNumber',
+            'senderUid',
+            'senderName',
+            'senderRole',
+            'text',
+            'createdAt'
+          ])
+          && request.resource.data.flightId == flightId
+          && request.resource.data.flightNumber == get(
+            /databases/$(database)/documents/Flights/$(flightId)
+          ).data.flightNumber
+          && request.resource.data.senderUid == request.auth.uid
+          && request.resource.data.senderRole == (
+            isSupervisor() ? 'supervisor' : 'handler'
+          )
+          && request.resource.data.senderName is string
+          && request.resource.data.senderName.size() > 0
+          && request.resource.data.senderName.size() <= 80
+          && request.resource.data.text is string
+          && request.resource.data.text.trim().size() > 0
+          && request.resource.data.text.size() <= 500
+          && request.resource.data.createdAt == request.time;
+
+        // Messages cannot be edited or deleted.
+        allow update, delete: if false;
+      }
+    }
+
+    // Supervisors read every flight's messages (notifications) and
+    // every member document (rebuilding message access).
+    match /{path=**}/messages/{messageId} {
+      allow read: if isSupervisor();
+    }
+
+    match /{path=**}/members/{memberId} {
+      allow read: if isSupervisor();
+    }
+
+    // --------------------------------------------------
+    // NOTIFICATION STATE
+    // --------------------------------------------------
+    // Each user's "last seen" time, used to count unread notifications.
+
+    match /NotificationState/{uid} {
+
+      allow get: if signedIn() && request.auth.uid == uid;
+
+      allow create, update: if isApprovedStaff()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['lastSeenAt'])
+        && request.resource.data.lastSeenAt == request.time;
+
+      allow list, delete: if false;
+    }
   }
 }

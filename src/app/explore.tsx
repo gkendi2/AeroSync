@@ -41,6 +41,7 @@ import {
 } from '@/features/handler/tasks';
 import { advanceTask } from '@/features/handler/taskService';
 import { confirmAction } from '@/lib/confirm';
+import { openFlightThread } from '@/lib/navigation';
 
 type Assignment = {
   id: string;
@@ -498,6 +499,20 @@ export default function MyTasksScreen() {
                     </View>
                   )}
 
+                  {flight && (
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => openFlightThread(router, flight.id)}
+                      style={({ pressed }) => [
+                        styles.messagesButton,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <Icon name="messages" size={16} color={RED} />
+                      <Text style={styles.messagesButtonText}>Messages</Text>
+                    </Pressable>
+                  )}
+
                   {!isCompleted && startDisabled && (
                     <Text style={styles.blockedText}>{startBlocked}</Text>
                   )}
@@ -751,6 +766,24 @@ const styles = StyleSheet.create({
   scanButtonText: {
     color: RED,
     fontSize: 11,
+    fontWeight: '800',
+  },
+
+  messagesButton: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: RED,
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+
+  messagesButtonText: {
+    color: RED,
+    fontSize: 12,
     fontWeight: '800',
   },
 

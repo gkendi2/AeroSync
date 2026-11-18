@@ -1,25 +1,20 @@
 
-import { auth, db } from '@/lib/firebase';
-import { normalizeFlightNumber } from '@/features/baggage/validation';
-import {
-  computeFlightInputs,
-  FlightLiveInputs,
-  isUnresolvedIncidentStatus,
-  NOT_SCORED_LABELS,
-} from '@/features/delay-risk/inputs';
+import { NOT_SCORED_LABELS } from '@/features/delay-risk/inputs';
 import {
   DelayRiskFeature,
-  DelayRiskResult,
-  evaluateDelayRisk,
-  outOfTrainingRange,
   PROBABILITY_THRESHOLD,
   RiskLevel,
   RULES,
 } from '@/features/delay-risk/model';
+import {
+  localDateKey,
+  useDelayRiskAssessments,
+  type Flight,
+  type FlightAssessment,
+} from '@/features/delay-risk/useDelayRiskAssessments';
 import Icon, { type AppIconName } from '@/components/icon';
-import { goBackOrHome } from '@/lib/navigation';
-import { useRouter } from 'expo-router';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { goBackOrHome, openFlightThread } from '@/lib/navigation';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -40,62 +35,12 @@ const BG = '#F7F7F8';
 const ORANGE = '#E6A000';
 const GREEN = '#15803D';
 
-const CLOCK_TICK_MS = 30000;
 
 const INPUT_LABELS: Record<DelayRiskFeature, string> = {
   time_remaining_minutes: 'time remaining',
   baggage_progress_pct: 'baggage progress',
   staff_availability_pct: 'staff availability',
   unresolved_incidents: 'unresolved incidents',
-};
-
-type Attendance = {
-  handlerUid: string;
-  date: string;
-  status: string;
-};
-
-type Assignment = {
-  id: string;
-  flightNumber: string;
-  handlerUid: string;
-  handlerName: string;
-  shiftDate: string;
-  shiftTime: string;
-  activity: string;
-  status: string;
-};
-
-type BaggageRecord = {
-  id: string;
-  baggageId: string;
-  flightId: string;
-  status: string;
-  createdAt: Date | null;
-};
-
-type Flight = {
-  id: string;
-  flightNumber: string;
-  origin: string;
-  destination: string;
-  departureDate: string;
-  departureTime: string;
-  status: string;
-  isDemo?: boolean;
-};
-
-type Incident = {
-  id: string;
-  flightId: string;
-  flightNumber: string;
-  reportCategory: string;
-  incidentType: string;
-  location: string;
-  severity: string;
-  description: string;
-  status: string;
-  reportedAt: Date | null;
 };
 
 type FactorId = 'Crew' | 'Baggage' | 'Incidents';
@@ -130,23 +75,6 @@ function factorColor(flightCount: number) {
   if (flightCount === 0) return GREEN;
   if (flightCount === 1) return ORANGE;
   return RED;
-}
-
-type FlightAssessment = {
-  flight: Flight;
-  live: FlightLiveInputs;
-  /** Hybrid model result; null when the flight cannot be scored. */
-  result: DelayRiskResult | null;
-  risk: RiskLevel | null;
-  outOfRange: DelayRiskFeature[];
-  unresolvedIncidents: Incident[];
-};
-
-function localDateKey(date = new Date()) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
 }
 
 function riskColor(risk: RiskLevel | null) {
@@ -197,264 +125,21 @@ function rowSummary(item: FlightAssessment) {
   }`;
 }
 
-function assessFlight(
-  flight: Flight,
-  assignments: Assignment[],
-  baggageRecords: BaggageRecord[],
-  incidents: Incident[],
-  attendance: Attendance[],
-  now: Date,
-): FlightAssessment {
-  const live = computeFlightInputs(
-    flight,
-    { bags: baggageRecords, assignments, attendance, incidents },
-    now,
-  );
-
-  const result = live.modelInputs ? evaluateDelayRisk(live.modelInputs) : null;
-
-  // Same flight match as computeFlightInputs: by Flights document id,
-  // falling back to the flight number on older reports.
-  const unresolvedIncidents = incidents.filter((item) => {
-    const belongs = item.flightId
-      ? item.flightId === flight.id
-      : normalizeFlightNumber(item.flightNumber) ===
-        normalizeFlightNumber(flight.flightNumber);
-
-    return belongs && isUnresolvedIncidentStatus(item.status);
-  });
-
-  return {
-    flight,
-    live,
-    result,
-    risk: result ? result.riskLevel : null,
-    outOfRange: live.modelInputs ? outOfTrainingRange(live.modelInputs) : [],
-    unresolvedIncidents,
-  };
-}
-
 export default function DelayRiskScreen() {
   const router = useRouter();
+  // Opened from a High-risk notification: show that flight's panel.
+  const params = useLocalSearchParams<{ flightId?: string }>();
 
-  const [now, setNow] = useState(() => new Date());
-  const [attendance, setAttendance] = useState<Attendance[]>([]);
-  const [loadingAttendance, setLoadingAttendance] = useState(
-    () => auth.currentUser !== null,
-  );
+  const { assessments, loading: isLoading, error, now } = useDelayRiskAssessments();
+  const [selectedFlightId, setSelectedFlightId] = useState(params.flightId ?? '');
 
-  const [assignments, setAssignments] = useState<Assignment[]>([]);
-  const [baggageRecords, setBaggageRecords] = useState<BaggageRecord[]>([]);
-  const [flightsData, setFlightsData] = useState<Flight[]>([]);
-  const [incidents, setIncidents] = useState<Incident[]>([]);
-
-  const [loadingAssignments, setLoadingAssignments] = useState(true);
-  const [loadingBaggage, setLoadingBaggage] = useState(true);
-  const [loadingFlights, setLoadingFlights] = useState(true);
-  const [loadingIncidents, setLoadingIncidents] = useState(true);
-
-  const [error, setError] = useState('');
-  const [selectedFlightId, setSelectedFlightId] = useState('');
+  useEffect(() => {
+    if (params.flightId) setSelectedFlightId(params.flightId);
+  }, [params.flightId]);
   const [riskFilter, setRiskFilter] = useState<RiskFilter>('At risk');
   const [selectedPeriod, setSelectedPeriod] = useState<'Today' | 'All flights'>('Today');
   const [showPeriodOptions, setShowPeriodOptions] = useState(false);
 
-  useEffect(() => {
-    if (!auth.currentUser) {
-      setError('Please sign in to view delay risk.');
-      setLoadingAssignments(false);
-      setLoadingBaggage(false);
-      setLoadingFlights(false);
-      setLoadingIncidents(false);
-      return;
-    }
-
-    const unsubscribeAssignments = onSnapshot(
-      collection(db, 'CrewAssignments'),
-      (snapshot) => {
-        setAssignments(
-          snapshot.docs.map((item) => {
-            const data = item.data();
-            return {
-              id: item.id,
-              flightNumber: data.flightNumber ?? '',
-              handlerUid: data.handlerUid ?? '',
-              handlerName: data.handlerName ?? 'Unknown handler',
-              shiftDate: data.shiftDate ?? '',
-              shiftTime: data.shiftTime ?? '',
-              activity: data.activity ?? '',
-              status: data.status ?? 'Assigned',
-            };
-          }),
-        );
-        setLoadingAssignments(false);
-      },
-      (err) => {
-        console.error('Could not load assignments:', err);
-        setError('Could not load crew assignment records.');
-        setLoadingAssignments(false);
-      },
-    );
-
-    const unsubscribeBaggage = onSnapshot(
-      collection(db, 'BaggageRecords'),
-      (snapshot) => {
-        setBaggageRecords(
-          snapshot.docs.map((item) => {
-            // 'estimate' gives a just-registered bag a createdAt straight away.
-            const data = item.data({ serverTimestamps: 'estimate' });
-            const timestamp = data.createdAt;
-
-            return {
-              id: item.id,
-              baggageId: data.baggageId ?? item.id,
-              flightId: data.flightId ?? '',
-              status: data.status ?? 'Unknown',
-              createdAt:
-                timestamp && typeof timestamp.toDate === 'function'
-                  ? timestamp.toDate()
-                  : null,
-            };
-          }),
-        );
-        setLoadingBaggage(false);
-      },
-      (err) => {
-        console.error('Could not load baggage:', err);
-        setError('Could not load baggage records.');
-        setLoadingBaggage(false);
-      },
-    );
-
-    const unsubscribeFlights = onSnapshot(
-      collection(db, 'Flights'),
-      (snapshot) => {
-        setFlightsData(
-          snapshot.docs.map((item) => {
-            const data = item.data();
-
-            return {
-              id: item.id,
-              flightNumber: data.flightNumber ?? '',
-              origin: data.origin ?? '',
-              destination: data.destination ?? '',
-              departureDate: data.departureDate ?? '',
-              departureTime: data.departureTime ?? '',
-              status: data.status ?? '',
-              isDemo: data.isDemo ?? false,
-            };
-          }),
-        );
-        setLoadingFlights(false);
-      },
-      (err) => {
-        console.error('Could not load flights:', err);
-        setError('Could not load flight records.');
-        setLoadingFlights(false);
-      },
-    );
-
-    const unsubscribeIncidents = onSnapshot(
-      collection(db, 'Incidents'),
-      (snapshot) => {
-        setIncidents(
-          snapshot.docs.map((item) => {
-            const data = item.data();
-            const timestamp = data.reportedAt;
-
-            return {
-              id: item.id,
-              flightId: data.flightId ?? '',
-              flightNumber: data.flightNumber ?? '',
-              reportCategory: data.reportCategory ?? '',
-              incidentType: data.incidentType ?? '',
-              location: data.location ?? '',
-              severity: data.severity ?? 'Low',
-              description: data.description ?? '',
-              status: data.status ?? 'Open',
-              reportedAt:
-                timestamp && typeof timestamp.toDate === 'function'
-                  ? timestamp.toDate()
-                  : null,
-            };
-          }),
-        );
-        setLoadingIncidents(false);
-      },
-      (err) => {
-        console.error('Could not load incidents:', err);
-        setError('Could not load incident records.');
-        setLoadingIncidents(false);
-      },
-    );
-
-    return () => {
-      unsubscribeAssignments();
-      unsubscribeBaggage();
-      unsubscribeFlights();
-      unsubscribeIncidents();
-    };
-  }, []);
-
-  // Time remaining changes without any Firestore update, so re-score on a timer.
-  useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), CLOCK_TICK_MS);
-    return () => clearInterval(timer);
-  }, []);
-
-  // Today's check-ins. Only today's records can affect staff availability:
-  // a shift on a later date has not started yet.
-  const todayKey = localDateKey(now);
-
-  useEffect(() => {
-    if (!auth.currentUser) return;
-
-    const unsubscribeAttendance = onSnapshot(
-      query(collection(db, 'Attendance'), where('date', '==', todayKey)),
-      (snapshot) => {
-        setAttendance(
-          snapshot.docs.map((item) => {
-            const data = item.data();
-            return {
-              handlerUid: data.handlerUid ?? '',
-              date: data.date ?? '',
-              status: data.status ?? '',
-            };
-          }),
-        );
-        setLoadingAttendance(false);
-      },
-      (err) => {
-        console.error('Could not load attendance:', err);
-        setError('Could not load attendance records.');
-        setLoadingAttendance(false);
-      },
-    );
-
-    return unsubscribeAttendance;
-  }, [todayKey]);
-
-  // Only real Flights documents are assessed.
-  const flights = useMemo(
-    () =>
-      flightsData.filter(
-        (flight) => flight.id && flight.flightNumber.trim(),
-      ),
-    [flightsData],
-  );
-
-  const assessments = useMemo(() => {
-    return flights.map((flight) =>
-      assessFlight(
-        flight,
-        assignments,
-        baggageRecords,
-        incidents,
-        attendance,
-        now,
-      ),
-    );
-  }, [flights, assignments, baggageRecords, incidents, attendance, now]);
 
   const visibleAssessments = useMemo(() => {
     if (selectedPeriod === 'All flights') return assessments;
@@ -543,13 +228,6 @@ export default function DelayRiskScreen() {
   const selectedAssessment = assessments.find(
     (item) => item.flight.id === selectedFlightId,
   );
-
-  const isLoading =
-    loadingAssignments ||
-    loadingBaggage ||
-    loadingFlights ||
-    loadingIncidents ||
-    loadingAttendance;
 
   // Risk-factor counts over the visible flights. Rule counts can only come
   // from scored flights; "no crew" / "no baggage" flights are the not-scored ones.
@@ -845,6 +523,16 @@ export default function DelayRiskScreen() {
                     ))}
                   </View>
                 )}
+
+                <Pressable
+                  onPress={() =>
+                    openFlightThread(router, selectedAssessment.flight.id)
+                  }
+                  style={styles.messagesButton}
+                >
+                  <Icon name="messages" size={18} color={RED} />
+                  <Text style={styles.messagesButtonText}>Open messages</Text>
+                </Pressable>
 
                 <Text style={styles.detailDisclaimer}>
                   The risk level combines a decision tree trained on synthetic data with operational rules R1–R4. It is not a validated flight-delay prediction.
@@ -1473,6 +1161,24 @@ const styles = StyleSheet.create({
   errorText: {
     color: RED,
     fontSize: 12,
+  },
+
+  messagesButton: {
+    minHeight: 44,
+    flexDirection: 'row',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: RED,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 14,
+  },
+
+  messagesButtonText: {
+    color: RED,
+    fontSize: 13,
+    fontWeight: '800',
   },
 
   detailPanel: {

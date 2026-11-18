@@ -20,6 +20,8 @@ import {
   PROBABILITY_THRESHOLD,
   RULES,
 } from '@/features/delay-risk/model';
+import { rebuildMessageAccess } from '@/features/messages/service';
+import { isAdminUser } from '@/lib/admin';
 import { auth, db } from '@/lib/firebase';
 import { goBackOrHome } from '@/lib/navigation';
 import { useRouter } from 'expo-router';
@@ -64,6 +66,7 @@ export default function AccountScreen() {
   const [role, setRole] = useState<UserRole>('');
   const [loading, setLoading] = useState(true);
   const [signingOut, setSigningOut] = useState(false);
+  const [rebuilding, setRebuilding] = useState(false);
 
   useEffect(() => {
     const user = auth.currentUser;
@@ -174,6 +177,30 @@ export default function AccountScreen() {
   // Supervisors open Account from More (so it has a back button and the model
   // section); for handlers it is a tab.
   const isSupervisor = role === 'supervisor';
+  const isAdmin = isAdminUser(auth.currentUser);
+
+  // Admin tool: rebuild flight-message membership from the current assignments
+  // (the backfill for assignments created before messages existed).
+  async function handleRebuildAccess() {
+    if (rebuilding || !auth.currentUser) return;
+    setRebuilding(true);
+
+    try {
+      const result = await rebuildMessageAccess(auth.currentUser.uid);
+      showMessage(
+        'Message access rebuilt',
+        `${result.members} handler–flight membership(s) in place. ${result.written} written, ${result.removed} removed.`
+      );
+    } catch (error) {
+      console.error('Rebuilding message access failed:', error);
+      showMessage(
+        'Rebuild failed',
+        'Message access could not be rebuilt. Check your connection and that the latest Firestore rules are deployed.'
+      );
+    } finally {
+      setRebuilding(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -379,6 +406,42 @@ export default function AccountScreen() {
           </>
         )}
 
+        {/* MESSAGE ACCESS (admin only) */}
+        {isAdmin && (
+          <>
+            <Text style={styles.sectionTitle}>Flight message access</Text>
+
+            <View style={[styles.infoCard, styles.modelCard]}>
+              <Text style={styles.modelText}>
+                Gives every handler access to the message threads of the flights they are assigned to
+                (non-cancelled assignments), and removes access that no longer applies. New assignment
+                changes keep this up to date automatically; run it once after deploying the rules, or
+                whenever access looks wrong.
+              </Text>
+
+              <Pressable
+                onPress={handleRebuildAccess}
+                disabled={rebuilding}
+                style={({ pressed }) => [
+                  styles.rebuildButton,
+                  pressed && styles.menuRowPressed,
+                  rebuilding && styles.signOutDisabled,
+                ]}
+                accessibilityRole="button"
+              >
+                {rebuilding ? (
+                  <ActivityIndicator color={DEEP_RED} />
+                ) : (
+                  <>
+                    <Icon name="messages" size={18} color={DEEP_RED} />
+                    <Text style={styles.rebuildButtonText}>Rebuild message access</Text>
+                  </>
+                )}
+              </Pressable>
+            </View>
+          </>
+        )}
+
         {/* AEROSYNC INFORMATION */}
         <Text style={styles.sectionTitle}>AeroSync</Text>
 
@@ -455,6 +518,24 @@ export default function AccountScreen() {
 }
 
 const styles = StyleSheet.create({
+  rebuildButton: {
+    minHeight: 44,
+    flexDirection: 'row',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: DEEP_RED,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+  },
+
+  rebuildButtonText: {
+    color: DEEP_RED,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+
   safeArea: {
     flex: 1,
     backgroundColor: '#F5F5F6',
