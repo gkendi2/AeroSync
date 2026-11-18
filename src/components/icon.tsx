@@ -60,6 +60,9 @@ export const ICONS = {
   send: 'send',
   bell: 'bell-outline',
   newTask: 'clipboard-plus-outline',
+
+  // Sign-in
+  google: 'google',
 } satisfies Record<string, IconName>;
 
 export type AppIconName = keyof typeof ICONS;

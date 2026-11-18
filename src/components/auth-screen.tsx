@@ -1,4 +1,9 @@
+import Icon from '@/components/icon';
 import { auth, db } from '@/lib/firebase';
+import {
+  GOOGLE_SIGN_IN_AVAILABLE,
+  signInWithGoogle,
+} from '@/lib/google-sign-in';
 import {
   createUserWithEmailAndPassword,
   deleteUser,
@@ -7,7 +12,7 @@ import {
   signOut,
   updateProfile,
 } from 'firebase/auth';
-import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { useState } from 'react';
 import {
   ActivityIndicator,
@@ -205,6 +210,123 @@ export default function AuthScreen() {
         isRegistering ? 'Registration failed' : 'Login failed',
         messages[error?.code] ??
           'Something went wrong. Check your connection and try again.'
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Web only: the button is hidden on Android and iOS.
+  async function handleGoogleSignIn() {
+    if (loading || resettingPassword) return;
+
+    setLoading(true);
+
+    let credential;
+
+    try {
+      credential = await signInWithGoogle();
+    } catch (error: any) {
+      const code = error?.code ?? '';
+
+      if (
+        code === 'auth/popup-closed-by-user' ||
+        code === 'auth/cancelled-popup-request' ||
+        code === 'auth/user-cancelled'
+      ) {
+        showMessage('Sign-in cancelled', 'Google sign-in was cancelled.');
+      } else {
+        console.error('Google sign-in failed:', error);
+
+        const messages: Record<string, string> = {
+          'auth/popup-blocked':
+            'Your browser blocked the Google sign-in window. Allow pop-ups for this site and try again.',
+          'auth/account-exists-with-different-credential':
+            'This email already has an AeroSync password. Sign in with your email and password below.',
+          'auth/operation-not-allowed':
+            'Google sign-in is not enabled for this project yet.',
+          'auth/unauthorized-domain':
+            'Google sign-in is not allowed from this web address yet.',
+          'auth/user-disabled': 'This account has been disabled.',
+          'auth/network-request-failed':
+            'Network error. Check your connection and try again.',
+        };
+
+        showMessage(
+          'Google sign-in failed',
+          messages[code] ??
+            'Something went wrong. Check your connection and try again.'
+        );
+      }
+
+      setLoading(false);
+      return;
+    }
+
+    const user = credential.user;
+
+    try {
+      const profile = await getDoc(doc(db, 'users', user.uid));
+
+      // Existing account (same email or earlier Google sign-in): keeps its role.
+      if (profile.exists()) return;
+
+      // A role is only requested on the Register form.
+      if (!isRegistering) {
+        await signOut(auth);
+        showMessage(
+          'No AeroSync account',
+          'No AeroSync account uses this Google address. Tap Register, choose your role, then Continue with Google.'
+        );
+        return;
+      }
+
+      const googleEmail = (user.email ?? '').trim().toLowerCase();
+      const googleName =
+        user.displayName?.trim() || googleEmail.split('@')[0] || 'AeroSync user';
+
+      // Same profile as an email registration: pending until approved.
+      try {
+        await setDoc(doc(db, 'users', user.uid), {
+          uid: user.uid,
+          email: googleEmail,
+          displayName: googleName,
+          role: 'pending' satisfies Role,
+          requestedRole,
+          createdAt: serverTimestamp(),
+        });
+      } catch (profileError) {
+        console.error('Firestore profile save failed:', profileError);
+
+        try {
+          await deleteUser(user);
+        } catch (deleteError) {
+          console.error('Account rollback failed:', deleteError);
+
+          try {
+            await signOut(auth);
+          } catch (signOutError) {
+            console.error('Sign-out failed:', signOutError);
+          }
+        }
+
+        throw profileError;
+      }
+
+      showMessage(
+        'Registration submitted',
+        requestedRole === 'supervisor'
+          ? 'Your supervisor registration request has been submitted. Supervisor access requires separate authorization.'
+          : 'Your handler registration request has been submitted. A supervisor must approve your account before you can access operational records.'
+      );
+    } catch (error: any) {
+      console.error('Google account setup failed:', error);
+
+      showMessage(
+        isRegistering ? 'Registration failed' : 'Login failed',
+        error?.code === 'permission-denied'
+          ? 'Your profile could not be created. Check the Firestore rules and try again.'
+          : 'Something went wrong. Check your connection and try again.'
       );
     } finally {
       setLoading(false);
@@ -495,6 +617,38 @@ export default function AuthScreen() {
                 )}
               </Pressable>
 
+              {GOOGLE_SIGN_IN_AVAILABLE && Platform.OS === 'web' && (
+                <>
+                  <View style={styles.dividerRow}>
+                    <View style={styles.dividerLine} />
+                    <Text style={styles.dividerText}>or</Text>
+                    <View style={styles.dividerLine} />
+                  </View>
+
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.googleButton,
+                      pressed && styles.googlePressed,
+                      (loading || resettingPassword) && styles.disabled,
+                    ]}
+                    onPress={handleGoogleSignIn}
+                    disabled={loading || resettingPassword}
+                    accessibilityRole="button"
+                  >
+                    <Icon name="google" size={20} color="#252525" />
+                    <Text style={styles.googleButtonText}>
+                      Continue with Google
+                    </Text>
+                  </Pressable>
+
+                  {isRegistering && (
+                    <Text style={styles.googleNote}>
+                      Uses your Google account's main email address.
+                    </Text>
+                  )}
+                </>
+              )}
+
               <Pressable
                 onPress={toggleMode}
                 disabled={loading || resettingPassword}
@@ -539,6 +693,49 @@ export default function AuthScreen() {
 }
 
 const styles = StyleSheet.create({
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 16,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#E2E2E2',
+  },
+  dividerText: {
+    color: '#858585',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  googleButton: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    marginTop: 14,
+    borderWidth: 1,
+    borderColor: '#DADCE0',
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+  },
+  googlePressed: {
+    backgroundColor: '#F5F5F5',
+  },
+  googleButtonText: {
+    color: '#252525',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  googleNote: {
+    color: '#777777',
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 8,
+  },
   screen: {
     flex: 1,
     backgroundColor: '#20232B',

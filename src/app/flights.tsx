@@ -1,4 +1,5 @@
 
+import AirportPicker from '@/components/airport-picker';
 import DateTimeField from '@/components/date-time-field';
 import Icon from '@/components/icon';
 import { auth, db } from '@/lib/firebase';
@@ -374,24 +375,24 @@ export default function FlightsScreen() {
         {
           id: 'on-track',
           flightNumber: 'KQ901',
-          origin: 'Nairobi',
-          destination: 'Mombasa',
+          origin: 'NBO',
+          destination: 'MBA',
           minutesUntilDeparture: 240,
           demoScenario: 'on-track',
         },
         {
           id: 'under-pressure',
           flightNumber: 'KQ902',
-          origin: 'Nairobi',
-          destination: 'Kisumu',
+          origin: 'NBO',
+          destination: 'KIS',
           minutesUntilDeparture: 100,
           demoScenario: 'under-pressure',
         },
         {
           id: 'close-to-departure',
           flightNumber: 'KQ903',
-          origin: 'Nairobi',
-          destination: 'Eldoret',
+          origin: 'NBO',
+          destination: 'EDL',
           minutesUntilDeparture: 25,
           demoScenario: 'close-to-departure',
         },
@@ -712,20 +713,25 @@ export default function FlightsScreen() {
                 autoCapitalize="characters"
               />
 
+              {/* Pickers store the 3-letter code, exactly as the text fields did. */}
               <Text style={styles.formLabel}>ORIGIN</Text>
-              <TextInput
-                style={styles.formInput}
-                placeholder="e.g. NBO"
+              <AirportPicker
+                title="Origin airport"
+                style={[styles.formInput, styles.airportField]}
                 value={origin}
-                onChangeText={setOrigin}
+                onChange={setOrigin}
+                excludeCode={destination}
+                excludeLabel="Same as destination"
               />
 
               <Text style={styles.formLabel}>DESTINATION</Text>
-              <TextInput
-                style={styles.formInput}
-                placeholder="e.g. JNB"
+              <AirportPicker
+                title="Destination airport"
+                style={[styles.formInput, styles.airportField]}
                 value={destination}
-                onChangeText={setDestination}
+                onChange={setDestination}
+                excludeCode={origin}
+                excludeLabel="Same as origin"
               />
 
               <Text style={styles.formLabel}>DEPARTURE DATE</Text>
@@ -1435,6 +1441,12 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     marginTop: 12,
     marginBottom: 6,
+  },
+  // The airport field can wrap to two lines.
+  airportField: {
+    height: 'auto',
+    minHeight: 42,
+    paddingVertical: 8,
   },
   formInput: {
     height: 42,
