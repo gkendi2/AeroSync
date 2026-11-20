@@ -2,11 +2,13 @@ import DateTimeField from '@/components/date-time-field';
 import Icon from '@/components/icon';
 import {
   formatShiftTime,
-  parseDateString,
-  parseTimeString,
   splitShiftTime,
   toDateString,
 } from '@/features/datetime/format';
+import {
+  suggestShiftTimes,
+  upcomingFlights as pickUpcomingFlights,
+} from '@/features/flights/upcoming';
 import {
   createAssignmentWithAccess,
   updateAssignmentWithAccess,
@@ -80,17 +82,6 @@ type UpcomingFlight = {
   departureTime: string;
   status: string;
 };
-
-// Same test as the flights screen's Completed tab.
-function isCompletedFlight(status: string) {
-  const value = status.toLowerCase();
-  return (
-    value.includes('complete') ||
-    value.includes('departed') ||
-    value.includes('arrived') ||
-    value.includes('landed')
-  );
-}
 
 const RED = '#C8102E';
 const DARK = '#292929';
@@ -342,36 +333,19 @@ export default function CrewScreen() {
   // Flights that have not departed yet and are not cancelled or completed,
   // soonest first. Computed when the picker opens, so "now" is current.
   function upcomingFlights() {
-    const now = Date.now();
-
-    return flightsData
-      .filter((flight) => {
-        if (!flight.flightNumber.trim()) return false;
-        if (flight.status.toLowerCase().includes('cancel')) return false;
-        if (isCompletedFlight(flight.status)) return false;
-
-        const day = parseDateString(flight.departureDate);
-        if (!day) return false;
-
-        const time = parseTimeString(flight.departureTime);
-        if (!time) {
-          // No readable time: keep it while its date is today or later.
-          return flight.departureDate >= toDateString(new Date());
-        }
-
-        day.setHours(time.getHours(), time.getMinutes(), 0, 0);
-        return day.getTime() >= now;
-      })
-      .sort((a, b) =>
-        `${a.departureDate} ${a.departureTime}`.localeCompare(
-          `${b.departureDate} ${b.departureTime}`
-        )
-      );
+    return pickUpcomingFlights(flightsData);
   }
 
   function selectFlight(flight: UpcomingFlight) {
     setFlightNumber(flight.flightNumber);
     setShiftDate(flight.departureDate);
+
+    // Suggest a shift when none is set yet; the supervisor can change it.
+    if (!shiftStart && !shiftEnd) {
+      const suggested = suggestShiftTimes(flight.departureTime);
+      if (suggested) changeShiftTimes(suggested.start, suggested.end);
+    }
+
     setShowFlightPicker(false);
   }
 
@@ -950,6 +924,10 @@ export default function CrewScreen() {
                   />
                 </View>
               </View>
+
+              <Text style={styles.helperText}>
+                Suggested: 2 hours before departure to 30 minutes after.
+              </Text>
 
               <Text style={styles.fieldLabel}>
                 BAGGAGE-HANDLING ACTIVITY
@@ -1583,14 +1561,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
+  // Start and end are stacked so each time picker gets the full width
+  // (the iOS spinner was cut off in a half-width column).
   shiftRow: {
-    flexDirection: 'row',
-    gap: 12,
+    flexDirection: 'column',
   },
 
   shiftField: {
-    flex: 1,
-    minWidth: 0,
+    width: '100%',
   },
 
   handlerOption: {

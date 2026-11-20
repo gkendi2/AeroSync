@@ -1,4 +1,5 @@
 
+import { explainRiskLevel } from '@/features/delay-risk/explain';
 import { NOT_SCORED_LABELS } from '@/features/delay-risk/inputs';
 import {
   DelayRiskFeature,
@@ -419,6 +420,32 @@ export default function DelayRiskScreen() {
 
                 {selectedAssessment.result ? (
                   <>
+                    {selectedAssessment.live.modelInputs && (() => {
+                      const explanation = explainRiskLevel(
+                        selectedAssessment.result,
+                        selectedAssessment.live.modelInputs,
+                      );
+
+                      return (
+                        <>
+                          <Text style={styles.detailSectionTitle}>
+                            Why this risk level
+                          </Text>
+
+                          <View style={styles.detailFinding}>
+                            <Text style={styles.detailFindingTitle}>
+                              {explanation.summary}
+                            </Text>
+                            {explanation.rules.map((rule) => (
+                              <Text key={rule.id} style={styles.detailFindingText}>
+                                {rule.text}
+                              </Text>
+                            ))}
+                          </View>
+                        </>
+                      );
+                    })()}
+
                     <Text style={styles.detailSectionTitle}>Model result</Text>
 
                     <View style={styles.detailFinding}>

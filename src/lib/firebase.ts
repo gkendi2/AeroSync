@@ -1,11 +1,7 @@
 import { getApp, getApps, initializeApp } from 'firebase/app';
-import {
-  browserSessionPersistence,
-  getAuth,
-  setPersistence,
-} from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
-import { Platform } from 'react-native';
+
+import { createAuth } from './create-auth';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyAVkmICVoyXkPlLedmEwo6xmAkycxPN8Qg',
@@ -20,11 +16,10 @@ const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
 export const db = getFirestore(app);
 
-export const auth = getAuth(app);
+// Web: authentication only for the current browser session (create-auth.web.ts).
+// Native: stays signed in after the app reloads (create-auth.ts, AsyncStorage).
+const authSetup = createAuth(app);
 
-// Web: keep authentication only for the current browser session.
-// Native: retain the existing Firebase authentication behaviour.
-export const authPersistenceReady =
-  Platform.OS === 'web'
-    ? setPersistence(auth, browserSessionPersistence)
-    : Promise.resolve();
+export const auth = authSetup.auth;
+
+export const authPersistenceReady: Promise<void> = authSetup.ready;

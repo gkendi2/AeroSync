@@ -315,7 +315,10 @@ service cloud.firestore {
             /databases/$(database)/documents/BaggageRecords/$(baggageId)
           ).data.lastHandlingEventId == eventId;
 
-        allow read, update, delete: if false;
+        // Supervisors and Gloria read events for a bag's history.
+        // Handlers only create events; nobody edits or deletes them.
+        allow read: if isSupervisor();
+        allow update, delete: if false;
       }
     }
 

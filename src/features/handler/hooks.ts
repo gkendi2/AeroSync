@@ -9,7 +9,7 @@ import { useEffect, useState } from 'react';
 import type { BaggageRecord, FlightRecord } from '@/features/delay-risk/inputs';
 import { db } from '@/lib/firebase';
 
-export type HandlerFlight = FlightRecord & { origin: string; destination: string };
+export type HandlerFlight = FlightRecord & { origin: string; destination: string; status: string };
 
 export function flightRoute(flight: HandlerFlight | null | undefined) {
   if (!flight || (!flight.origin && !flight.destination)) return undefined;
@@ -34,6 +34,7 @@ export function useFlights() {
                 destination: data.destination ?? '',
                 departureDate: data.departureDate ?? '',
                 departureTime: data.departureTime ?? '',
+                status: data.status ?? '',
               };
             }),
           ),

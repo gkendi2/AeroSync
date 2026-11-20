@@ -18,6 +18,7 @@ import {
   View,
 } from 'react-native';
 
+import BagHistory from '@/components/bag-history';
 import BaggageQrCard from '@/components/baggage-qr-card';
 import Icon from '@/components/icon';
 import RegisterBaggageScreen from '@/components/register-baggage-screen';
@@ -213,6 +214,12 @@ export default function BaggageScreen() {
                 selectedRecord.baggageId ||
                 selectedRecord.id
               }
+            />
+
+            <BagHistory
+              bagId={selectedRecord.id}
+              createdAt={selectedRecord.createdAt}
+              registeredBy={selectedRecord.registeredBy}
             />
 
             <Pressable onPress={() => setSelectedRecordId('')}>

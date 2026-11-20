@@ -6,7 +6,7 @@ import {
   serverTimestamp,
   writeBatch,
 } from 'firebase/firestore';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -25,6 +25,8 @@ import BaggageQrCard from '@/components/baggage-qr-card';
 import Icon from '@/components/icon';
 import { buildQrPayload } from '@/features/baggage/qr';
 import { validateFlightNumber } from '@/features/baggage/validation';
+import { upcomingFlights } from '@/features/flights/upcoming';
+import { useFlights } from '@/features/handler/hooks';
 import AeroSyncLogo from '@/components/aerosync-logo';
 
 export type RegisteredBaggage = {
@@ -51,6 +53,17 @@ export default function RegisterBaggageScreen({
   onBack,
 }: RegisterBaggageScreenProps) {
   const [flightNumber, setFlightNumber] = useState('');
+  const [selectedFlightId, setSelectedFlightId] = useState('');
+  const [showFlightPicker, setShowFlightPicker] = useState(false);
+
+  // Same list as the crew form: not departed, not cancelled or completed,
+  // soonest first. Recomputed when the picker opens.
+  const flights = useFlights();
+  const pickableFlights = useMemo(
+    () => (showFlightPicker ? upcomingFlights(flights) : []),
+    [flights, showFlightPicker],
+  );
+  const selectedFlight = flights.find((flight) => flight.id === selectedFlightId);
   const [bagCount, setBagCount] = useState('');
   const [registering, setRegistering] = useState(false);
   const [registered, setRegistered] = useState<RegisteredBaggage[]>([]);
@@ -118,6 +131,7 @@ export default function RegisterBaggageScreen({
 
       setRegistered(createdRecords);
       setFlightNumber('');
+      setSelectedFlightId('');
       setBagCount('');
     } catch (error) {
       console.error('Error registering baggage batch:', error);
@@ -321,23 +335,87 @@ export default function RegisterBaggageScreen({
                 </View>
 
                 <Text style={styles.fieldLabel}>
-                  FLIGHT NUMBER <Text style={styles.required}>*</Text>
+                  FLIGHT <Text style={styles.required}>*</Text>
                 </Text>
 
-                <TextInput
-                  style={styles.input}
-                  placeholder="e.g. KQ100"
-                  placeholderTextColor="#9AA0A6"
-                  value={flightNumber}
-                  onChangeText={setFlightNumber}
-                  autoCapitalize="characters"
-                  autoCorrect={false}
-                  editable={!registering}
-                  returnKeyType="next"
-                />
+                <Pressable
+                  style={[styles.input, styles.flightSelector]}
+                  onPress={() => setShowFlightPicker((open) => !open)}
+                  disabled={registering}
+                  accessibilityRole="button"
+                >
+                  <View style={styles.flightSelectorText}>
+                    <Text
+                      style={[
+                        styles.flightSelectorValue,
+                        !flightNumber && styles.flightSelectorPlaceholder,
+                      ]}
+                    >
+                      {flightNumber || 'Select an upcoming flight'}
+                    </Text>
+                    {selectedFlight && (
+                      <Text style={styles.flightOptionMeta}>
+                        {selectedFlight.origin} → {selectedFlight.destination} ·{' '}
+                        {selectedFlight.departureDate}{' '}
+                        {selectedFlight.departureTime || '—'}
+                      </Text>
+                    )}
+                  </View>
+                  <Icon
+                    name={showFlightPicker ? 'collapse' : 'expand'}
+                    size={22}
+                    color={MUTED}
+                  />
+                </Pressable>
+
+                {showFlightPicker && (
+                  <View style={styles.flightPickerList}>
+                    {pickableFlights.length === 0 ? (
+                      <Text style={styles.fieldHint}>
+                        No upcoming flights. Create one on the Flights screen
+                        first.
+                      </Text>
+                    ) : (
+                      pickableFlights.map((flight) => {
+                        const selected = flight.id === selectedFlight?.id;
+
+                        return (
+                          <Pressable
+                            key={flight.id}
+                            onPress={() => {
+                              setSelectedFlightId(flight.id);
+                              setFlightNumber(flight.flightNumber);
+                              setShowFlightPicker(false);
+                            }}
+                            style={[
+                              styles.flightOption,
+                              selected && styles.flightOptionSelected,
+                            ]}
+                          >
+                            <View style={styles.flightSelectorText}>
+                              <Text style={styles.flightSelectorValue}>
+                                {flight.flightNumber}
+                              </Text>
+                              <Text style={styles.flightOptionMeta}>
+                                {flight.origin} → {flight.destination} ·{' '}
+                                {flight.departureDate}{' '}
+                                {flight.departureTime || '—'}
+                              </Text>
+                            </View>
+                            <Icon
+                              name={selected ? 'check' : 'unchecked'}
+                              size={20}
+                              color={selected ? RED : '#B8BBC0'}
+                            />
+                          </Pressable>
+                        );
+                      })
+                    )}
+                  </View>
+                )}
 
                 <Text style={styles.fieldHint}>
-                  Enter the flight number associated with these bags.
+                  Choose the flight these bags are checked in for.
                 </Text>
 
                 <View style={styles.fieldDivider} />
@@ -562,6 +640,52 @@ const styles = StyleSheet.create({
     fontSize: 10,
     lineHeight: 15,
     marginTop: 7,
+  },
+  flightSelector: {
+    height: 'auto',
+    minHeight: 47,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+  },
+  flightSelectorText: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  flightSelectorValue: {
+    color: DARK,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  flightSelectorPlaceholder: {
+    color: '#9AA0A6',
+    fontWeight: '400',
+  },
+  flightPickerList: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  flightOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F1F2',
+    backgroundColor: '#FFFFFF',
+  },
+  flightOptionSelected: {
+    backgroundColor: '#FFF3F5',
+  },
+  flightOptionMeta: {
+    color: MUTED,
+    fontSize: 11,
   },
   fieldDivider: {
     height: 1,
