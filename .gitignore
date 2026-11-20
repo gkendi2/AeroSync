@@ -31,7 +31,10 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
+.env.*
 .env*.local
+!.env.example
 
 # typescript
 *.tsbuildinfo
@@ -54,4 +57,8 @@ package-lock.sdk57.backup.json
 
 # Firebase service-account keys (never commit; keep them outside the repo)
 *serviceAccount*.json
+*service-account*.json
 *-firebase-adminsdk-*.json
+*credentials*.json
+*-key.json
+*_key.json

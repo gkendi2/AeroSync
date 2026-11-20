@@ -852,7 +852,12 @@ const styles = StyleSheet.create({
   },
 
   scannerOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    // Fills the camera view (what StyleSheet.absoluteFillObject used to provide).
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.12)',

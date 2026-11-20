@@ -1,203 +1,73 @@
+# AeroSync
 
-AeroSync ✈️
-AeroSync is a mobile ground operations management application built for airport staff. It provides role-based access for handlers and supervisors and supports day-to-day operational workflows including crew task management, baggage tracking, QR-based baggage handling, and incident reporting.
+AeroSync is a mobile app for airport ground operations. Handlers and supervisors use it to coordinate crew tasks, baggage handling, incident reports and flight delay risk. It is built with **Expo SDK 58** (React Native, Expo Router, TypeScript) and **Firebase** (Authentication and Cloud Firestore), and runs on Android, iOS (Expo Go) and the web.
 
-Overview
-AeroSync is designed to bring key ground operations activities into one mobile application.
+## Roles
 
-The application uses Firebase Authentication and Cloud Firestore for authentication, staff profiles, operational records, and real-time updates.
+- **Handler:** checks in and out for the day, works through assigned tasks, scans baggage QR codes to record loading and offloading, reports incidents and sees the supervisor's corrective action, and messages the crew of their flights.
+- **Supervisor:** manages flights, registers baggage (with QR codes and a handling history per bag), assigns crew, monitors delay risk, manages incident reports and messages any flight.
+- **Administrator:** a supervisor account that also approves or rejects new registrations. Approvals require two-factor sign-in with an authenticator app.
 
-User Roles
-Handler
-Handlers can:
+New accounts (email/password, or Google on the web) stay pending until the administrator approves them.
 
-View assigned operational tasks
-Start and complete assigned tasks
-Scan baggage QR codes
-Register baggage handling actions
-Record baggage loading and offloading
-Report operational incidents
-View their account information
-Supervisor
-Supervisors can:
+## Main features
 
-View the operations dashboard
-Review pending staff approvals
-Manage baggage operations
-View crew information and assignments
-Monitor delay-risk information
-Review operational information
-Access their account
-Key Features
-📦 Baggage Operations
-AeroSync supports a complete baggage tracking workflow:
+- **Baggage:** registration with QR codes, scanning, and the Registered → Loading → Offloaded workflow, recorded in Firestore transactions.
+- **Crew tasks:** Assigned → In Progress → Completed, with attendance check-in and overdue tasks.
+- **Delay risk:** a decision tree combined with operational rules R1–R4 gives High, Medium or Low per flight, with a plain-language explanation.
+- **Incidents:** reporting, review status and corrective actions.
+- **Flight messages:** a message thread per flight.
+- **In-app notifications:** new tasks, report updates, messages, new incidents and High-risk flights.
 
-Register a baggage record
-Generate a unique QR code
-Save the QR code to the device's photo library
-Scan the QR code using the AeroSync scanner
-Verify the baggage and flight information
-Record the loading action
-Record the offloading action
-Track the baggage status in Firestore
-Baggage records progress through controlled statuses:
+## Getting started
 
-Registered → Loading → Offloaded
-The handling workflow uses a Firestore transaction so the baggage status update and handling event are recorded as one atomic operation.
+Requirements: Node.js 22 and npm.
 
-👷 Crew Tasks
-Supervisors can assign operational activities to handlers.
-
-Handlers can view their assigned tasks and move them through the supported workflow:
-
-Assigned → In Progress → Completed
-⚠️ Incident Reporting
-Approved staff can report operational incidents with:
-
-Incident type
-Flight number
-Location
-Severity
-Description
-Reporter
-Report time
-Incident status
-New incidents are stored in Firestore and displayed in the application.
-
-👤 Account Management
-The Account screen provides staff with:
-
-Profile information
-Account role
-Account access status
-About AeroSync information
-Help and support information
-Secure sign-out
-Authentication and Security
-AeroSync uses Firebase Authentication for user authentication and Cloud Firestore for application data.
-
-Firestore security rules enforce role-based access for operational collections. Handler actions are restricted to valid state transitions, while supervisor permissions provide access to supervisory workflows.
-
-The application also prevents pending accounts from accessing the operational application until their requested role has been approved.
-
-Technology Stack
-React Native
-Expo SDK 57
-Expo Router
-TypeScript
-Firebase Authentication
-Cloud Firestore
-React Native SVG
-QR code generation and scanning
-Jest
-Jest Expo
-Project Structure
-AeroSync/
-├── src/
-│   ├── app/
-│   │   ├── _layout.tsx
-│   │   ├── index.tsx
-│   │   ├── explore.tsx
-│   │   ├── scan-qr.tsx
-│   │   ├── baggage.tsx
-│   │   ├── incidents.tsx
-│   │   └── account.tsx
-│   │
-│   ├── components/
-│   │   ├── app-tabs.tsx
-│   │   ├── baggage-qr-card.tsx
-│   │   └── register-baggage-screen.tsx
-│   │
-│   ├── features/
-│   │   └── baggage/
-│   │       ├── handling.ts
-│   │       ├── handlingService.ts
-│   │       ├── qr.ts
-│   │       ├── validation.ts
-│   │       └── _tests_/
-│   │
-│   └── lib/
-│       └── firebase.ts
-│
-├── firestore.rules
-├── jest.config.js
-├── package.json
-└── README.md
-Getting Started
-1. Install dependencies
+```bash
 npm install
-2. Start the Expo development server
 npx expo start
-Then open the application using an available development option such as Expo Go, a development build, an Android emulator, or an iOS simulator.
+```
 
-3. Firebase configuration
-AeroSync requires a Firebase project configured for:
+Then scan the QR code with **Expo Go** on a phone, or press `w` to open the web version.
 
-Firebase Authentication
-Cloud Firestore
-The application's Firebase configuration is contained in the project's Firebase library configuration.
+## Tests and type check
 
-Do not commit private credentials, service-account files, or other secrets to the repository.
+```bash
+npm test            # Jest unit tests
+npm run typecheck   # TypeScript (tsc --noEmit)
+```
 
-Testing
-AeroSync includes Jest unit tests for the baggage workflow.
+GitHub Actions runs both on every push and pull request to `main` (`.github/workflows/ci.yml`).
 
-Run the baggage tests with:
+## Firestore security rules
 
-npx jest src/features/baggage/_tests_ --runInBand
-The current baggage test suite covers:
+The rules are in `firestore.rules`. Changing the file does not change the live database: publish it in the Firebase console (Firestore Database → Rules → Publish) after every change.
 
-Baggage handling state transitions
-QR payload creation and parsing
-Flight-number validation
-Current result:
+## Machine learning
 
-Test Suites: 3 passed, 3 total
-Tests:       27 passed, 27 total
-TypeScript can be checked with:
+The delay-risk model lives in `ml/`:
 
-npx tsc --noEmit
-Baggage Handling Validation
-The baggage workflow includes validation to prevent invalid operations.
+- `ml/notebooks/AeroSync.ipynb`: training, evaluation and export (run in Google Colab)
+- `ml/models/`: the trained tree (`.pkl`), the same tree as JSON used by the app, and the test cases that check the app gives the same results
+- `ml/README.md`: model inputs, rules and how to reproduce it
 
-Examples:
+Python packages are listed in `requirements.txt` (`pip install -r requirements.txt`). The data preparation scripts are in `scripts/`. The model is trained on synthetic data and is a prototype, not a validated delay prediction.
 
-A registered bag can be loaded.
-A loaded bag can be offloaded.
-A bag that has already been offloaded cannot be processed again.
-A bag cannot be offloaded before it has been loaded.
-Invalid flight numbers are rejected during registration.
-Invalid QR payloads are rejected during scanning.
-These rules are also enforced at the Firestore security-rule level.
+## Scripts
 
-Design
-AeroSync uses a consistent visual language across the application:
+- `scripts/generate-airports.js`: regenerates the airport list used by the flight form.
+- `scripts/admin-mfa.js`: administrator tool to enable two-factor authentication or reset the administrator's second factor. It needs a Firebase service-account key stored **outside** this folder; never commit key files.
 
-Navy: #163B65
-Blue: #2878C8
-Light grey background: #F4F6FA
-White operational cards
-Rounded components
-Role-aware navigation
-Clear status indicators
-The interface is designed to keep important ground-operations actions easy to find and quick to use on mobile devices.
+## Data sources and attribution
 
-Development Notes
-The project uses Expo Router for file-based navigation and a role-aware tab layout.
-
-Authentication state is handled at the application root. Once authenticated, the user's Firestore profile determines whether the user is a handler or supervisor and which operational navigation is displayed.
-
-Operational data is stored in Cloud Firestore and updated in real time where appropriate.
-
-Data Sources and Attribution
-The airport list used by the flight form (src/features/flights/airports.generated.ts) is derived from the OpenFlights Airport and Route Databases (https://openflights.org/data.php), from the copy in data/reference/kq-routes-reference.zip.
+The airport list used by the flight form (`src/features/flights/airports.generated.ts`) is derived from the OpenFlights Airport and Route Databases (https://openflights.org/data.php), from the copy in `data/reference/kq-routes-reference.zip`.
 
 The OpenFlights databases are made available under the Open Database License (ODbL) v1.0 (https://opendatacommons.org/licenses/odbl/1-0/). Any rights in individual contents of the databases are licensed under the Database Contents License (DbCL) v1.0 (https://opendatacommons.org/licenses/dbcl/1-0/). Airport base data in OpenFlights comes from OurAirports and DAFIF and is in the public domain.
 
-The derived airport list (every Kenyan airport with an IATA code, plus every airport in a Kenya Airways route) is likewise made available under the ODbL v1.0. It is generated by scripts/generate-airports.js.
+The derived airport list (every Kenyan airport with an IATA code, plus every airport in a Kenya Airways route) is likewise made available under the ODbL v1.0. It is generated by `scripts/generate-airports.js`.
 
 The OpenFlights route data stopped being updated in June 2014, so the list reflects Kenya Airways routes as of 2014 and is of historical value only. Current destinations that are missing from the list (for example JFK) can still be entered in the flight form by typing their 3-letter IATA code.
 
-License
-This project is developed as an academic software project. Third-party data is used under the licences listed in Data Sources and Attribution above.
+## License
 
+This project is developed as an academic software project. Third-party data is used under the licences listed in Data sources and attribution above.
