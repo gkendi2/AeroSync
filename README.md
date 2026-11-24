@@ -1,6 +1,18 @@
 # AeroSync
 
-AeroSync is a mobile app for airport ground operations. Handlers and supervisors use it to coordinate crew tasks, baggage handling, incident reports and flight delay risk. It is built with **Expo SDK 58** (React Native, Expo Router, TypeScript) and **Firebase** (Authentication and Cloud Firestore), and runs on Android, iOS (Expo Go) and the web.
+AeroSync is a mobile app for airport ground operations. Handlers and supervisors use it to coordinate crew tasks, baggage handling, incident reports and flight delay risk. It is built with **Expo SDK 58** (React Native, Expo Router, TypeScript) and **Firebase** (Authentication and Cloud Firestore), and runs on Android and iOS through Expo Go and on the web, where it is deployed as an installable PWA.
+
+## Live demo
+
+**[Open AeroSync →](https://aerosync-49084.web.app)**
+
+AeroSync is deployed on Firebase Hosting as an installable Progressive Web App (PWA).
+
+- **Computer:** open the link in any modern browser.
+- **iPhone:** open the link in Safari, then Share → Add to Home Screen.
+- **Android:** open the link in Chrome, then ⋮ → Install app (or Add to Home screen).
+
+New accounts stay pending until the administrator approves them. The app can also be run locally through Expo Go (see [Getting started](#getting-started)).
 
 ## Roles
 
@@ -42,6 +54,15 @@ npm run typecheck   # TypeScript (tsc --noEmit)
 
 GitHub Actions runs both on every push and pull request to `main` (`.github/workflows/ci.yml`).
 
+## Deploying the web version
+
+```bash
+npx expo export --platform web
+npx firebase-tools deploy --only hosting
+```
+
+The Firebase Hosting settings are in `firebase.json`; the site is https://aerosync-49084.web.app.
+
 ## Project structure
 
 ```text
@@ -49,6 +70,7 @@ AeroSync/
 ├── src/
 │   ├── app/                 Screens and routes (Expo Router): home, flights, baggage, crew,
 │   │                        delay risk, incidents, approvals, messages, notifications, account
+│   │   └── +html.tsx        Web page head for the PWA (manifest link, iPhone home-screen tags)
 │   ├── components/          Shared UI: tab bar, sign-in screen, pickers, QR card, bag history
 │   ├── features/            App logic by feature; unit tests sit in each _tests_/ folder
 │   │   ├── auth/            Admin two-factor (authenticator app) helpers
@@ -66,11 +88,13 @@ AeroSync/
 ├── ml/
 │   ├── notebooks/           AeroSync.ipynb: model training, evaluation and export
 │   └── models/              Decision tree (.pkl, and .json used by the app) and parity test cases
+├── public/                  PWA manifest and home-screen icons for the web version
 ├── data/                    Source and processed datasets for the model (raw zip files not committed)
 ├── scripts/                 Data preparation, airport list generator, admin two-factor tool
 ├── docs/brand/              AeroSync logo files
 ├── .github/workflows/       ci.yml: type check and tests on push and pull request to main
 ├── firestore.rules          Firestore security rules (publish in the Firebase console)
+├── firebase.json            Firebase Hosting and Firestore rules configuration
 ├── requirements.txt         Python packages for the notebook and scripts
 ├── jest.config.js           Test setup (jest-expo)
 └── app.json, package.json, tsconfig.json   Expo, npm and TypeScript configuration
