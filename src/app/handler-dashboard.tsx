@@ -24,6 +24,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import AeroSyncLogo from '@/components/aerosync-logo';
+import { greetingFirstName, greetingForTime } from '@/features/auth/display-name';
 import NotificationBell from '@/components/notification-bell';
 import FlightStrip from '@/components/flight-strip';
 import Icon from '@/components/icon';
@@ -117,7 +118,16 @@ function formatClock(value?: Timestamp | null) {
     : '--:--';
 }
 
-export default function HandlerDashboard() {
+/**
+ * profileName: the handler's name from users/{uid}, passed in by the home
+ * screen, which already loads the profile. Opened directly as a route, the
+ * greeting falls back to the sign-in account's name.
+ */
+export default function HandlerDashboard({
+  profileName,
+}: {
+  profileName?: string;
+}) {
   const router = useRouter();
   const user = auth.currentUser;
   const flights = useFlights();
@@ -384,12 +394,8 @@ export default function HandlerDashboard() {
     }
   }
 
-  const greeting =
-    currentTime.getHours() < 12
-      ? 'Good morning'
-      : currentTime.getHours() < 17
-        ? 'Good afternoon'
-        : 'Good evening';
+  const greeting = greetingForTime(currentTime);
+  const greetingName = greetingFirstName(profileName, user?.displayName, 'Handler');
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -418,7 +424,7 @@ export default function HandlerDashboard() {
         >
           <View style={styles.heroOverlay}>
             <Text style={styles.greeting}>{greeting},</Text>
-            <Text style={styles.handlerName}>Handler.</Text>
+            <Text style={styles.handlerName}>{greetingName}.</Text>
             <Text style={styles.dateText}>
               {currentTime.toLocaleDateString([], {
                 weekday: 'short',

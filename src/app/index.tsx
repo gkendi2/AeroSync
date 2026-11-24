@@ -26,6 +26,7 @@ import { useRouter } from 'expo-router';
 import HandlerDashboard from './handler-dashboard';
 import AeroSyncLogo from '@/components/aerosync-logo';
 import NotificationBell from '@/components/notification-bell';
+import { greetingFirstName, greetingForTime } from '@/features/auth/display-name';
 import { shouldPromptEnrolment, useAdminMfa } from '@/features/auth/useAdminMfa';
 
 type FlightSummary = {
@@ -112,6 +113,8 @@ export default function HomeScreen() {
 
   const [role, setRole] = useState('');
   const [profileLoading, setProfileLoading] = useState(true);
+  // Name entered at registration (users/{uid}.displayName), for the greeting.
+  const [profileName, setProfileName] = useState('');
 
   const [pendingCount, setPendingCount] = useState(0);
   const [baggageCount, setBaggageCount] = useState(0);
@@ -133,6 +136,9 @@ export default function HomeScreen() {
       (snapshot) => {
         setRole(
           snapshot.exists() ? snapshot.data().role ?? '' : ''
+        );
+        setProfileName(
+          snapshot.exists() ? snapshot.data().displayName ?? '' : ''
         );
         setProfileLoading(false);
       },
@@ -209,7 +215,7 @@ export default function HomeScreen() {
   }
 
   if (role === 'handler') {
-    return <HandlerDashboard />;
+    return <HandlerDashboard profileName={profileName} />;
   }
 
   if (role !== 'supervisor') {
@@ -253,8 +259,11 @@ export default function HomeScreen() {
     );
   }
 
-  const supervisorName =
-    auth.currentUser?.displayName?.split(' ')[0] || 'Supervisor';
+  const supervisorName = greetingFirstName(
+    profileName,
+    auth.currentUser?.displayName,
+    'Supervisor'
+  );
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -284,7 +293,9 @@ export default function HomeScreen() {
         >
           <View style={styles.imageOverlay}>
             <View style={styles.welcomeCopy}>
-              <Text style={styles.greeting}>Good morning,</Text>
+              <Text style={styles.greeting}>
+                {greetingForTime(new Date())},
+              </Text>
               <Text style={styles.greetingName}>
                 {supervisorName}.
               </Text>
