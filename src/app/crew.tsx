@@ -10,6 +10,11 @@ import {
   upcomingFlights as pickUpcomingFlights,
 } from '@/features/flights/upcoming';
 import {
+  handlerName,
+  suggestHandlers,
+  type SuggestAttendance,
+} from '@/features/crew/suggest';
+import {
   createAssignmentWithAccess,
   updateAssignmentWithAccess,
 } from '@/features/messages/service';
@@ -263,6 +268,91 @@ export default function CrewScreen() {
       unsubscribeFlights();
     };
   }, [currentUser?.uid, isAdmin]);
+
+  // Data for "Suggested handlers" (read-only; supervisors may read all
+  // assignments and attendance). Every supervisor's assignments on the shift
+  // date count, not only this supervisor's, so clashes are not missed.
+  const [dayAssignments, setDayAssignments] = useState<CrewAssignment[]>([]);
+  const [todayAttendance, setTodayAttendance] = useState<SuggestAttendance[]>([]);
+
+  useEffect(() => {
+    if (!showAssignmentForm || !/^\d{4}-\d{2}-\d{2}$/.test(shiftDate.trim())) {
+      setDayAssignments([]);
+      return;
+    }
+
+    return onSnapshot(
+      query(collection(db, 'CrewAssignments'), where('shiftDate', '==', shiftDate.trim())),
+      (snapshot) =>
+        setDayAssignments(
+          snapshot.docs.map((item) => {
+            const data = item.data();
+            return {
+              id: item.id,
+              handlerUid: data.handlerUid ?? '',
+              handlerName: data.handlerName ?? '',
+              flightNumber: data.flightNumber ?? '',
+              shiftDate: data.shiftDate ?? '',
+              shiftTime: data.shiftTime ?? '',
+              activity: data.activity ?? '',
+              status: data.status ?? 'Assigned',
+            };
+          })
+        ),
+      (err) => console.error('Could not load assignments for suggestions:', err)
+    );
+  }, [showAssignmentForm, shiftDate]);
+
+  useEffect(() => {
+    if (!showAssignmentForm) return;
+
+    return onSnapshot(
+      query(collection(db, 'Attendance'), where('date', '==', toDateString(new Date()))),
+      (snapshot) =>
+        setTodayAttendance(
+          snapshot.docs.map((item) => {
+            const data = item.data();
+            return {
+              handlerUid: data.handlerUid ?? '',
+              date: data.date ?? '',
+              status: data.status ?? '',
+            };
+          })
+        ),
+      (err) => console.error('Could not load attendance for suggestions:', err)
+    );
+  }, [showAssignmentForm]);
+
+  // Shown once a flight and both shift times are set. Suggestions only:
+  // nothing is assigned until the supervisor saves.
+  const showSuggestions = !!flightNumber && !!shiftStart && !!shiftEnd;
+
+  const suggestions = useMemo(
+    () =>
+      showSuggestions
+        ? suggestHandlers({
+            handlers,
+            assignments: dayAssignments,
+            attendance: todayAttendance,
+            flightNumber,
+            shiftDate,
+            shiftTime: formatShiftTime(shiftStart, shiftEnd),
+            today: toDateString(new Date()),
+            excludeAssignmentId: editingAssignment?.id,
+          })
+        : [],
+    [
+      showSuggestions,
+      handlers,
+      dayAssignments,
+      todayAttendance,
+      flightNumber,
+      shiftDate,
+      shiftStart,
+      shiftEnd,
+      editingAssignment?.id,
+    ]
+  );
 
   const activeAssignments = useMemo(
     () =>
@@ -929,6 +1019,64 @@ export default function CrewScreen() {
                 Suggested: 2 hours before departure to 30 minutes after.
               </Text>
 
+              {showSuggestions && !loading && (
+                <View style={styles.suggestionSection}>
+                  <Text style={styles.fieldLabel}>SUGGESTED HANDLERS</Text>
+
+                  {suggestions.length === 0 ? (
+                    <Text style={styles.helperText}>
+                      No available handlers for this shift
+                    </Text>
+                  ) : (
+                    suggestions.map((suggestion) => {
+                      const name = handlerName(suggestion.handler);
+                      const selected =
+                        selectedHandler?.uid === suggestion.handler.uid;
+
+                      return (
+                        <Pressable
+                          key={suggestion.handler.uid}
+                          onPress={() => {
+                            setSelectedHandler(suggestion.handler);
+                            setShowHandlerPicker(false);
+                            setHandlerSearch('');
+                          }}
+                          style={[
+                            styles.handlerOption,
+                            selected && styles.selectedOption,
+                          ]}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Select ${name}. ${suggestion.reason}`}
+                        >
+                          <View style={styles.avatarSmall}>
+                            <Text style={styles.avatarInitial}>
+                              {name.charAt(0).toUpperCase()}
+                            </Text>
+                          </View>
+
+                          <View style={styles.handlerInfo}>
+                            <Text style={styles.handlerName}>{name}</Text>
+                            <Text style={styles.helperText}>
+                              {suggestion.reason}
+                            </Text>
+                          </View>
+
+                          <Icon
+                            name={selected ? 'check' : 'unchecked'}
+                            size={20}
+                            color={selected ? RED : '#B8BBC0'}
+                          />
+                        </Pressable>
+                      );
+                    })
+                  )}
+
+                  <Text style={styles.helperText}>
+                    Suggestions only. You can still choose any handler under Select handler above.
+                  </Text>
+                </View>
+              )}
+
               <Text style={styles.fieldLabel}>
                 BAGGAGE-HANDLING ACTIVITY
               </Text>
@@ -1569,6 +1717,14 @@ const styles = StyleSheet.create({
 
   shiftField: {
     width: '100%',
+  },
+
+  suggestionSection: {
+    marginTop: 14,
+    marginBottom: 14,
+    paddingBottom: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
   },
 
   handlerOption: {
