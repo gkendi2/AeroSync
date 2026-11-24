@@ -18,6 +18,7 @@ import {
   View,
 } from 'react-native';
 
+import AirlineTagEditor from '@/components/airline-tag-editor';
 import BagHistory from '@/components/bag-history';
 import BaggageQrCard from '@/components/baggage-qr-card';
 import Icon from '@/components/icon';
@@ -29,6 +30,7 @@ type BaggageRecord = {
   baggageId?: string;
   flightId?: string;
   baggageReference?: string;
+  airlineTagNumber?: string;
   status?: string;
   qrId?: string;
   qrPayload?: string;
@@ -148,7 +150,8 @@ export default function BaggageScreen() {
         (record.baggageId || '').toLowerCase().includes(term) ||
         record.id.toLowerCase().includes(term) ||
         (record.flightId || '').toLowerCase().includes(term) ||
-        (record.baggageReference || '').toLowerCase().includes(term);
+        (record.baggageReference || '').toLowerCase().includes(term) ||
+        (record.airlineTagNumber || '').toLowerCase().includes(term);
 
       return matchesFilter && matchesSearch;
     });
@@ -214,6 +217,11 @@ export default function BaggageScreen() {
                 selectedRecord.baggageId ||
                 selectedRecord.id
               }
+            />
+
+            <AirlineTagEditor
+              bagId={selectedRecord.id}
+              airlineTagNumber={selectedRecord.airlineTagNumber}
             />
 
             <BagHistory

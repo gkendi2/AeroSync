@@ -40,12 +40,14 @@ import {
   wrongFlightWarning,
 } from '@/features/handler/tasks';
 import { confirmAction } from '@/lib/confirm';
+import { airlineTagLabel } from '@/features/baggage/airline-tag';
 
 type BaggageRecord = {
   id: string;
   baggageId?: string;
   flightId?: string;
   baggageReference?: string;
+  airlineTagNumber?: string;
   qrId?: string;
   qrPayload?: string;
   status?: string;
@@ -117,6 +119,7 @@ export default function ScanQRScreen() {
         baggageId: recordData.baggageId,
         flightId: recordData.flightId,
         baggageReference: recordData.baggageReference,
+        airlineTagNumber: recordData.airlineTagNumber,
         qrId: recordData.qrId,
         qrPayload: recordData.qrPayload,
         status: recordData.status,
@@ -550,6 +553,10 @@ export default function ScanQRScreen() {
                 {baggage.baggageReference || 'Not specified'}
               </Text>
             </View>
+
+            <Text style={styles.formHint}>
+              {airlineTagLabel(baggage.airlineTagNumber)}
+            </Text>
 
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Current status</Text>

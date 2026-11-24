@@ -25,6 +25,10 @@ import BaggageQrCard from '@/components/baggage-qr-card';
 import Icon from '@/components/icon';
 import { buildQrPayload } from '@/features/baggage/qr';
 import { validateFlightNumber } from '@/features/baggage/validation';
+import {
+  AIRLINE_TAG_MAX_DIGITS,
+  validateAirlineTagNumber,
+} from '@/features/baggage/airline-tag';
 import { upcomingFlights } from '@/features/flights/upcoming';
 import { useFlights } from '@/features/handler/hooks';
 import AeroSyncLogo from '@/components/aerosync-logo';
@@ -34,6 +38,7 @@ export type RegisteredBaggage = {
   baggageId: string;
   flightId: string;
   baggageReference: string;
+  airlineTagNumber?: string;
   status: 'Registered';
   qrId: string;
   qrPayload: string;
@@ -65,6 +70,8 @@ export default function RegisterBaggageScreen({
   );
   const selectedFlight = flights.find((flight) => flight.id === selectedFlightId);
   const [bagCount, setBagCount] = useState('');
+  // Optional airline bag tag number; only for a single-bag registration.
+  const [airlineTag, setAirlineTag] = useState('');
   const [registering, setRegistering] = useState(false);
   const [registered, setRegistered] = useState<RegisteredBaggage[]>([]);
 
@@ -84,6 +91,21 @@ export default function RegisterBaggageScreen({
       Alert.alert(
         'Invalid number of bags',
         'Enter a number between 1 and 100.',
+      );
+      return;
+    }
+
+    const tagCheck = validateAirlineTagNumber(airlineTag);
+
+    if (!tagCheck.ok) {
+      Alert.alert('Invalid airline tag number', tagCheck.error);
+      return;
+    }
+
+    if (tagCheck.tag && count > 1) {
+      Alert.alert(
+        'One tag number per bag',
+        'An airline tag number can only be entered when registering one bag. Register these bags without it, then add each tag number from the bag details.',
       );
       return;
     }
@@ -114,6 +136,7 @@ export default function RegisterBaggageScreen({
           qrId: newRecord.id,
           qrPayload: buildQrPayload(newRecord.id),
           registeredBy: auth.currentUser.uid,
+          ...(tagCheck.tag ? { airlineTagNumber: tagCheck.tag } : {}),
         };
 
         batch.set(newRecord, {
@@ -133,6 +156,7 @@ export default function RegisterBaggageScreen({
       setFlightNumber('');
       setSelectedFlightId('');
       setBagCount('');
+      setAirlineTag('');
     } catch (error) {
       console.error('Error registering baggage batch:', error);
 
@@ -441,6 +465,31 @@ export default function RegisterBaggageScreen({
 
                 <Text style={styles.fieldHint}>
                   You can register between 1 and 100 bags per operation.
+                </Text>
+
+                <View style={styles.fieldDivider} />
+
+                <Text style={styles.fieldLabel}>
+                  AIRLINE BAG TAG NUMBER (OPTIONAL)
+                </Text>
+
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g. 0706123456"
+                  placeholderTextColor="#9AA0A6"
+                  value={airlineTag}
+                  onChangeText={setAirlineTag}
+                  keyboardType="number-pad"
+                  maxLength={AIRLINE_TAG_MAX_DIGITS}
+                  autoCorrect={false}
+                  editable={!registering}
+                />
+
+                <Text style={styles.fieldHint}>
+                  The 10-digit number on the airline's bag tag, if available.
+                  {Number.parseInt(bagCount, 10) > 1
+                    ? ' For several bags, add each tag number from the bag details after registering.'
+                    : ''}
                 </Text>
 
                 {/* PREVIEW */}
