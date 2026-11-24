@@ -13,11 +13,14 @@ New accounts (email/password, or Google on the web) stay pending until the admin
 ## Main features
 
 - **Baggage:** registration with QR codes, scanning, and the Registered → Loading → Offloaded workflow, recorded in Firestore transactions.
+- **Bag history:** a timeline per bag showing who registered, loaded and offloaded it, and when.
 - **Crew tasks:** Assigned → In Progress → Completed, with attendance check-in and overdue tasks.
+- **Suggested handlers:** the assignment form suggests up to three free handlers for the chosen shift; the supervisor still decides.
 - **Delay risk:** a decision tree combined with operational rules R1–R4 gives High, Medium or Low per flight, with a plain-language explanation.
 - **Incidents:** reporting, review status and corrective actions.
 - **Flight messages:** a message thread per flight.
 - **In-app notifications:** new tasks, report updates, messages, new incidents and High-risk flights.
+- **Stay signed in on phones:** Android and iOS keep you signed in after the app restarts; the web signs you out when the browser tab closes.
 
 ## Getting started
 
@@ -38,6 +41,40 @@ npm run typecheck   # TypeScript (tsc --noEmit)
 ```
 
 GitHub Actions runs both on every push and pull request to `main` (`.github/workflows/ci.yml`).
+
+## Project structure
+
+```text
+AeroSync/
+├── src/
+│   ├── app/                 Screens and routes (Expo Router): home, flights, baggage, crew,
+│   │                        delay risk, incidents, approvals, messages, notifications, account
+│   ├── components/          Shared UI: tab bar, sign-in screen, pickers, QR card, bag history
+│   ├── features/            App logic by feature; unit tests sit in each _tests_/ folder
+│   │   ├── auth/            Admin two-factor (authenticator app) helpers
+│   │   ├── baggage/         Handling workflow, QR codes and flight-number validation
+│   │   ├── crew/            Suggested handlers for crew assignments
+│   │   ├── datetime/        Date and shift-time formats
+│   │   ├── delay-risk/      Decision Tree evaluation, rules R1–R4, live inputs and the risk explanation
+│   │   ├── flights/         Airport list and search, upcoming flights, suggested shift times
+│   │   ├── handler/         Handler tasks, attendance rules and bag progress
+│   │   ├── messages/        Flight message threads and who can use them
+│   │   └── notifications/   In-app notifications and unread counts
+│   ├── lib/                 Firebase setup (sign-in kept on phones), admin account, Google sign-in
+│   ├── constants/, context/, hooks/   Theme colours and helpers
+│   └── types/               Extra TypeScript declarations
+├── ml/
+│   ├── notebooks/           AeroSync.ipynb: model training, evaluation and export
+│   └── models/              Decision tree (.pkl, and .json used by the app) and parity test cases
+├── data/                    Source and processed datasets for the model (raw zip files not committed)
+├── scripts/                 Data preparation, airport list generator, admin two-factor tool
+├── docs/brand/              AeroSync logo files
+├── .github/workflows/       ci.yml: type check and tests on push and pull request to main
+├── firestore.rules          Firestore security rules (publish in the Firebase console)
+├── requirements.txt         Python packages for the notebook and scripts
+├── jest.config.js           Test setup (jest-expo)
+└── app.json, package.json, tsconfig.json   Expo, npm and TypeScript configuration
+```
 
 ## Firestore security rules
 
